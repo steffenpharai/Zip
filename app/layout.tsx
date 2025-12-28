@@ -32,6 +32,12 @@ export default function RootLayout({
                 } else {
                   document.documentElement.classList.remove('dark');
                 }
+                const projector = localStorage.getItem('zip-projector');
+                if (projector === 'true') {
+                  document.documentElement.classList.add('projector');
+                } else {
+                  document.documentElement.classList.remove('projector');
+                }
               })();
             `,
           }}

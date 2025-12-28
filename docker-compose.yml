@@ -26,6 +26,7 @@ services:
       - NODE_ENV=development
       - WATCHPACK_POLLING=true
       - NEXT_TELEMETRY_DISABLED=1
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
     env_file:
       - .env
     stdin_open: true

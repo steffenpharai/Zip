@@ -5,14 +5,10 @@
  */
 
 import { z } from "zod";
-import OpenAI from "openai";
 import Database from "better-sqlite3";
 import { join } from "path";
 import { existsSync } from "fs";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { generateEmbedding, cosineSimilarity } from "@/lib/utils/embeddings";
 
 const DATA_DIR = join(process.cwd(), "data");
 const DOCS_DB_PATH = join(DATA_DIR, "docs.db");
@@ -27,25 +23,6 @@ function getDb(): Database.Database {
     db = new Database(DOCS_DB_PATH);
   }
   return db;
-}
-
-/**
- * Compute cosine similarity
- */
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0;
-  
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
 export const docSearchSchema = z.object({
@@ -116,14 +93,5 @@ export async function docSearch(input: z.infer<typeof docSearchSchema>): Promise
   return {
     chunks: topChunks,
   };
-}
-
-async function generateEmbedding(text: string): Promise<number[]> {
-  const response = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: text.substring(0, 8000),
-  });
-  
-  return response.data[0].embedding;
 }
 

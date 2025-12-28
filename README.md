@@ -142,6 +142,9 @@ User Input → Event Bus → State Reducer → UI Updates
 12. **Voice Persona** (`lib/voice/voicePersona.ts`): JARVIS-inspired voice persona configuration for Realtime and TTS
 13. **MCP Router Interface** (`lib/integrations/mcp-router.ts`): Stub interface for future Model Context Protocol integrations
 14. **VRM Avatar Control** (`lib/vrm/`, `components/hud/ZipFaceStage.tsx`): Full AI control over VRM avatar with bone rotation, expression control, and pose management
+15. **Projector Mode** (`lib/projector/`): Display mode optimized for projector presentations with larger text and adjusted layouts
+16. **Context Filtering** (`lib/orchestrators/utils/context-filter.ts`): Intelligent conversation history filtering using semantic similarity to include only relevant messages
+17. **Embeddings Utility** (`lib/utils/embeddings.ts`): Shared embedding utilities for semantic similarity operations across document search and context filtering
 
 ### OpenAI Integration
 
@@ -572,6 +575,7 @@ See `docs/VRM_STRUCTURE.md` for complete VRM structure documentation.
 - **Sub-Graphs**: Modular sub-graphs for specialized workflows:
   - **Research Graph**: Multi-step research pipeline with source validation (web_search → fetch_url → summarize_sources)
   - **Workflow Graph**: Mission planning and execution with progress tracking (planner → executor → narrator)
+- **Context Filtering**: Intelligent conversation history filtering using semantic similarity to include only relevant messages, preventing token waste and improving response quality
 - **Observability**: Full request tracing with request IDs and step tracking
 - **Error Handling**: Graceful fallbacks when sub-graphs fail
 
@@ -633,6 +637,14 @@ See `docs/VRM_STRUCTURE.md` for complete VRM structure documentation.
 - **Initial Pose**: VRM loads in T-pose (all bones at 0° rotation)
 - **Integration**: Fully integrated with LangGraph orchestrator and frontend
 - **Documentation**: Complete VRM structure documented in `docs/VRM_STRUCTURE.md` and integration guide in `docs/VRM_INTEGRATION.md`
+
+### Projector Mode
+- **Display Optimization**: Special display mode optimized for projector presentations
+- **Larger Text**: Increased font sizes for better visibility at distance
+- **Adjusted Layouts**: Modified rail widths and component sizes for projector displays
+- **Persistent Setting**: Projector mode preference saved in localStorage
+- **Toggle Control**: Accessible via settings dropdown (gear icon in top bar)
+- **CSS Classes**: Uses `.projector` class for conditional styling throughout the application
 
 ## Safety & Permissions
 
@@ -784,6 +796,8 @@ This checklist ensures the HUD matches the reference screenshot exactly:
 - [x] Mic button toggles Realtime (if configured)
 - [x] Camera button toggles camera state
 - [x] Concentric rings animate per Zip state
+- [x] Settings dropdown with theme toggle and projector mode toggle
+- [x] Projector mode adjusts layout for large displays
 
 ## Scripts
 
@@ -809,6 +823,9 @@ This checklist ensures the HUD matches the reference screenshot exactly:
 - `npx tsx scripts/test-brain-integration.ts` - Test AI Brain orchestration system routing and structure
 - `npx tsx scripts/test-orchestration.ts` - Test orchestration system functionality
 - `npx tsx scripts/test-voice-fallback.ts` - Test voice fallback (STT/TTS) functionality
+- `npx tsx scripts/test-context-filter.ts` - Test context filtering functionality
+- `npx tsx scripts/test-context-filter-relevant.ts` - Test context filter relevance detection
+- `npx tsx scripts/test-embedding-connection.ts` - Test embedding connection and similarity calculations
 
 ## Testing
 
@@ -883,6 +900,7 @@ Tests 20 scripted prompts to ensure:
 | `OPENAI_VISION_MODEL` | Vision API model | `gpt-4o` |
 | `OPENAI_TTS_MODEL` | TTS model for fallback | `gpt-4o-mini-tts-2025-12-15` |
 | `OPENAI_STT_MODEL` | STT model for fallback | `whisper-1` |
+| `OPENAI_EMBEDDING_MODEL` | Embedding model for semantic search | `text-embedding-3-small` |
 | `ZIP_REALTIME_ENABLED` | Enable Realtime WebRTC | `true` |
 | `ZIP_VOICE_FALLBACK_ENABLED` | Enable STT/TTS fallback | `true` |
 | `ZIP_UPDATE_INTERVAL_MS` | Panel update interval | `2000` |
@@ -908,6 +926,7 @@ ZIP uses **Open-Meteo** for weather data - a free, open-source weather API with 
 - **OPENAI_RESPONSES_MODEL**: Override default Responses API model (recommended: `gpt-4o` or `gpt-4-turbo`)
 - **OPENAI_VISION_MODEL**: Override default Vision model (recommended: `gpt-4o` for multimodal)
 - **OPENAI_TTS_MODEL**: Override default TTS model (default: `gpt-4o-mini-tts-2025-12-15`, supports `tts-1`, `tts-1-hd`, or `gpt-4o-mini-tts-*` models)
+- **OPENAI_EMBEDDING_MODEL**: Override default embedding model (default: `text-embedding-3-small`, alternatives: `text-embedding-3-large`, `text-embedding-ada-002`)
   - Note: The `instructions` field is only supported by `gpt-4o-mini-tts` models
   - Available voices for `gpt-4o-mini-tts`: `cedar`, `marin`, `onyx` (recommended: `cedar` for JARVIS voice)
 
@@ -1045,7 +1064,9 @@ zip/
 │   │   ├── types.ts       # Orchestration state types
 │   │   ├── research.ts    # Research orchestrator (legacy, delegates to graph)
 │   │   ├── workflow.ts    # Workflow orchestrator (legacy, delegates to graph)
-│   │   └── utils/         # Orchestration utilities
+│   │   └── utils/         # Orchestration utilities (context-filter, activity-tracker, etc.)
+│   ├── projector/         # Projector mode provider
+│   │   └── projector-provider.tsx # Projector mode context and state management
 │   ├── tools/             # Tool registry and executor
 │   │   ├── registry.ts    # Tool registry
 │   │   ├── executor.ts    # Tool executor
@@ -1058,12 +1079,17 @@ zip/
 │   │   ├── sessionStore.ts # Session management
 │   │   └── eventBridge.ts # Event bridge for voice events
 │   └── utils/             # Utility functions
+│       ├── embeddings.ts  # Shared embedding utilities for semantic similarity
+│       └── zod-to-json-schema.ts # Zod to JSON Schema conversion
 ├── scripts/               # Utility scripts
 │   ├── eval-harness.ts    # Eval harness (20 test prompts)
 │   ├── test-api-orchestration.ts # API orchestration tests
 │   ├── test-brain-integration.ts # AI Brain integration tests
 │   ├── test-orchestration.ts # Orchestration system tests
-│   └── test-voice-fallback.ts # Voice fallback tests
+│   ├── test-voice-fallback.ts # Voice fallback tests
+│   ├── test-context-filter.ts # Context filtering tests
+│   ├── test-context-filter-relevant.ts # Context filter relevance tests
+│   └── test-embedding-connection.ts # Embedding connection tests
 └── data/                  # Runtime data (created automatically)
     ├── audit.log          # Audit logs
     ├── traces/            # Trace files
@@ -1083,6 +1109,8 @@ zip/
 7. **Node-Based Orchestration**: Unified AI Brain orchestration system using a LangGraph-inspired node-based architecture for intelligent request routing and state management
 8. **Voice Persona**: JARVIS-inspired voice persona with calm, precise, confident, and warm communication style
 9. **MCP Integration Ready**: Stub interface for future Model Context Protocol integrations
+10. **Context Filtering**: Semantic similarity-based conversation history filtering to reduce token usage and improve relevance
+11. **Projector Mode**: Display mode optimized for projector presentations with larger text and adjusted layouts
 
 ## License
 

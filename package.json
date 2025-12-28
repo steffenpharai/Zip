@@ -9,7 +9,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
-    "screenshot:hud": "tsx tests/utils/screenshot.ts"
+    "screenshot:hud": "tsx tests/utils/screenshot.ts",
+    "test:embeddings": "tsx scripts/test-embedding-connection.ts"
   },
   "dependencies": {
     "next": "^14.2.0",

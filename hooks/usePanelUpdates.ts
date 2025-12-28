@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useEmitEvent } from "@/lib/events/hooks";
 import { INTERVALS } from "@/lib/constants";
 import { useHudStore } from "@/lib/state/hudStore";
@@ -12,6 +12,7 @@ export function usePanelUpdates() {
   const [locationRequested, setLocationRequested] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [lastWeatherUpdate, setLastWeatherUpdate] = useState<number>(0);
+  const isUpdatingRef = useRef<boolean>(false);
 
   // Get user's location using browser geolocation API
   useEffect(() => {
@@ -61,6 +62,10 @@ export function usePanelUpdates() {
 
   useEffect(() => {
     const updatePanels = async () => {
+      // Prevent concurrent updates
+      if (isUpdatingRef.current) return;
+      isUpdatingRef.current = true;
+
       try {
         // Update System Stats
         const systemResponse = await fetch("/api/tools/get_system_stats", {
@@ -131,6 +136,8 @@ export function usePanelUpdates() {
         });
       } catch (error) {
         console.error("Panel update error:", error);
+      } finally {
+        isUpdatingRef.current = false;
       }
     };
 

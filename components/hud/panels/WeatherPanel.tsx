@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useEventBus } from "@/lib/events/hooks";
+import { useProjector } from "@/lib/projector/projector-provider";
 import type { ZipEvent } from "@/lib/events/types";
 import { LAYOUT } from "@/lib/constants";
 import { format, parseISO } from "date-fns";
@@ -63,6 +64,7 @@ function getAqiLabel(aqi: number): { label: string; color: string } {
 export default function WeatherPanel() {
   const [weather, setWeather] = useState<Weather | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("current");
+  const { isProjectorMode } = useProjector();
 
   useEventBus((event: ZipEvent) => {
     if (event.type === "panel.update" && event.panel === "weather") {
@@ -182,7 +184,7 @@ export default function WeatherPanel() {
 
       {/* Hourly Forecast Tab */}
       {activeTab === "hourly" && weather.hourlyForecast && (
-        <div className="space-y-2 max-h-64 overflow-y-auto">
+        <div className={`space-y-2 ${isProjectorMode ? "" : "max-h-64 overflow-y-auto"}`}>
           {weather.hourlyForecast.map((hour, index) => (
             <div
               key={index}
@@ -214,7 +216,7 @@ export default function WeatherPanel() {
 
       {/* Daily Forecast Tab */}
       {activeTab === "daily" && weather.dailyForecast && (
-        <div className="space-y-2 max-h-64 overflow-y-auto">
+        <div className={`space-y-2 ${isProjectorMode ? "" : "max-h-64 overflow-y-auto"}`}>
           {weather.dailyForecast.map((day, index) => (
             <div
               key={index}

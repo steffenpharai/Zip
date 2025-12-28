@@ -12,6 +12,7 @@ import { zodToJsonSchema } from "@/lib/utils/zod-to-json-schema";
 import { getSystemPrompt } from "@/lib/openai/prompts";
 import { generateStepId } from "@/lib/observability/tracer";
 import { formatContextData } from "../utils/context-formatter";
+import { filterConversationHistory } from "../utils/context-filter";
 import type { ActivityTracker } from "../utils/activity-tracker";
 import type { OrchestrationCallbacks } from "../brain";
 
@@ -38,6 +39,13 @@ export async function toolCallingNode(
   console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Starting tool calling node`);
   console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Model: ${model}, Available tools: ${tools.length}`);
 
+  // Filter conversation history to include only relevant context
+  const filteredHistory = await filterConversationHistory(
+    state.userMessage,
+    state.conversationHistory,
+    state.requestId
+  );
+
   // Build system prompt with memory and context
   const memoryContext = state.pinnedMemory || "";
   const contextString = formatContextData(state.contextData);
@@ -48,7 +56,7 @@ export async function toolCallingNode(
       role: "system",
       content: systemPrompt,
     },
-    ...state.conversationHistory.map((msg) => ({
+    ...filteredHistory.map((msg) => ({
       role: msg.role,
       content: msg.content,
     })),

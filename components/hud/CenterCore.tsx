@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useHudStore } from "@/lib/state/hudStore";
+import { useProjector } from "@/lib/projector/projector-provider";
 import ControlDock from "./ControlDock";
 import { useEventBus } from "@/lib/events/hooks";
 import type { ZipEvent, BrainActivityEvent } from "@/lib/events/types";
@@ -22,6 +23,7 @@ const STATUS_MESSAGES: Record<string, string> = {
 
 export default function CenterCore() {
   const { state } = useHudStore();
+  const { isProjectorMode } = useProjector();
   const [activity, setActivity] = useState<BrainActivityEvent["activity"][]>([]);
   const [hasHadActivity, setHasHadActivity] = useState(false);
 
@@ -58,11 +60,11 @@ export default function CenterCore() {
   return (
     <div className="flex flex-col items-center justify-center gap-8">
       <div className="flex flex-col items-center gap-4">
-        <h2 className="text-text-primary text-2xl font-semibold tracking-zip uppercase">
+        <h2 className={`text-text-primary font-semibold tracking-zip uppercase ${isProjectorMode ? "text-4xl" : "text-2xl"}`}>
           ZIP
         </h2>
         <ZipFaceStage mode={state.mode} />
-        <p className="text-text-muted text-xs">{statusMessage}</p>
+        <p className={`text-text-muted ${isProjectorMode ? "text-sm" : "text-xs"}`}>{statusMessage}</p>
       </div>
       <ControlDock />
     </div>

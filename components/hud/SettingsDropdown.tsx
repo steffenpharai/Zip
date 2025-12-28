@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useTheme } from "@/lib/theme/use-theme";
+import { useProjector } from "@/lib/projector/projector-provider";
 
 interface SettingsDropdownProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ export default function SettingsDropdown({
   buttonRef,
 }: SettingsDropdownProps) {
   const { theme, toggleTheme } = useTheme();
+  const { isProjectorMode, toggleProjectorMode } = useProjector();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,37 +61,72 @@ export default function SettingsDropdown({
           Settings
         </h3>
         
-        <div className="flex items-center justify-between">
-          <div className="flex flex-col">
-            <span className="text-text-primary text-sm font-medium">
-              Theme
-            </span>
-            <span className="text-text-muted text-xs mt-0.5">
-              {theme === "dark" ? "Dark mode" : "Light mode"}
-            </span>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-text-primary text-sm font-medium">
+                Theme
+              </span>
+              <span className="text-text-muted text-xs mt-0.5">
+                {theme === "dark" ? "Dark mode" : "Light mode"}
+              </span>
+            </div>
+            
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleTheme();
+              }}
+              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-accent-cyan focus:ring-offset-2 focus:ring-offset-panel-surface"
+              role="switch"
+              aria-checked={theme === "dark"}
+              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            >
+              <span
+                className={`absolute inset-0 rounded-full transition-colors pointer-events-none ${
+                  theme === "dark" ? "bg-accent-cyan" : "bg-text-muted"
+                }`}
+              />
+              <span
+                className={`relative inline-block h-4 w-4 transform rounded-full bg-white transition-transform pointer-events-none z-10 ${
+                  theme === "dark" ? "translate-x-6" : "translate-x-1"
+                }`}
+              />
+            </button>
           </div>
-          
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleTheme();
-            }}
-            className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-accent-cyan focus:ring-offset-2 focus:ring-offset-panel-surface"
-            role="switch"
-            aria-checked={theme === "dark"}
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-          >
-            <span
-              className={`absolute inset-0 rounded-full transition-colors pointer-events-none ${
-                theme === "dark" ? "bg-accent-cyan" : "bg-text-muted"
-              }`}
-            />
-            <span
-              className={`relative inline-block h-4 w-4 transform rounded-full bg-white transition-transform pointer-events-none z-10 ${
-                theme === "dark" ? "translate-x-6" : "translate-x-1"
-              }`}
-            />
-          </button>
+
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-text-primary text-sm font-medium">
+                Projector mode
+              </span>
+              <span className="text-text-muted text-xs mt-0.5">
+                Optimized for 1280x720 display
+              </span>
+            </div>
+            
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleProjectorMode();
+              }}
+              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-accent-cyan focus:ring-offset-2 focus:ring-offset-panel-surface"
+              role="switch"
+              aria-checked={isProjectorMode}
+              aria-label={`${isProjectorMode ? "Disable" : "Enable"} projector mode`}
+            >
+              <span
+                className={`absolute inset-0 rounded-full transition-colors pointer-events-none ${
+                  isProjectorMode ? "bg-accent-cyan" : "bg-text-muted"
+                }`}
+              />
+              <span
+                className={`relative inline-block h-4 w-4 transform rounded-full bg-white transition-transform pointer-events-none z-10 ${
+                  isProjectorMode ? "translate-x-6" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -34,12 +34,14 @@ interface UseVRMControlOptions {
 export function useVRMControl({
   vrm,
   enabled = true,
-  pollInterval = 100, // Poll every 100ms
+  pollInterval = 500, // Poll every 500ms (reduced from 100ms to prevent flooding)
   onStateChange,
 }: UseVRMControlOptions) {
-  const pollIntervalRef = useRef<number | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
   const lastStateReportRef = useRef<number>(0);
   const stateReportInterval = 2000; // Report state every 2 seconds
+  const currentPollIntervalRef = useRef<number>(pollInterval);
+  const isPollingRef = useRef<boolean>(false);
 
   // Execute a VRM command
   const executeCommand = useCallback((command: VRMCommand) => {
@@ -165,24 +167,68 @@ export function useVRMControl({
     return false;
   }, [vrm]);
 
-  // Poll for pending commands
+  // Poll for pending commands with exponential backoff
   const pollCommands = useCallback(async () => {
-    if (!vrm || !enabled) return;
+    // Don't poll if disabled, no VRM, or already polling
+    if (!vrm || !enabled || isPollingRef.current) {
+      return;
+    }
+    
+    isPollingRef.current = true;
 
     try {
       const response = await fetch("/api/vrm/commands");
-      if (!response.ok) return;
-
-      const result = await response.json();
-      if (result.success && result.commands && result.commands.length > 0) {
-        for (const command of result.commands) {
-          executeCommand(command);
+      if (!response.ok) {
+        // On error, use longer backoff
+        currentPollIntervalRef.current = Math.min(
+          currentPollIntervalRef.current * 1.5,
+          5000
+        );
+        // Don't return - let finally block handle rescheduling
+      } else {
+        const result = await response.json();
+        if (result.success && result.commands && result.commands.length > 0) {
+          // Commands found - reset to base interval for faster polling
+          currentPollIntervalRef.current = pollInterval;
+          for (const command of result.commands) {
+            executeCommand(command);
+          }
+        } else {
+          // No commands - exponential backoff (max 5 seconds)
+          currentPollIntervalRef.current = Math.min(
+            currentPollIntervalRef.current * 1.5,
+            5000
+          );
         }
       }
     } catch (error) {
       // Silently fail - network errors are expected
+      // On error, use longer backoff
+      currentPollIntervalRef.current = Math.min(
+        currentPollIntervalRef.current * 1.5,
+        5000
+      );
+    } finally {
+      isPollingRef.current = false;
+      
+      // Always reschedule if still enabled and VRM is available
+      // Clear any existing timeout first to prevent duplicates
+      if (pollTimeoutRef.current !== null) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+      
+      if (enabled && vrm) {
+        pollTimeoutRef.current = window.setTimeout(() => {
+          const timeoutId = pollTimeoutRef.current;
+          pollTimeoutRef.current = null;
+          if (timeoutId !== null) {
+            pollCommands();
+          }
+        }, currentPollIntervalRef.current);
+      }
     }
-  }, [vrm, enabled, executeCommand]);
+  }, [vrm, enabled, executeCommand, pollInterval]);
 
   // Report current VRM state to server
   const reportState = useCallback(async () => {
@@ -250,41 +296,78 @@ export function useVRMControl({
         }
       }
 
+      // Prepare state data
+      const stateData = {
+        bones,
+        blendShapes,
+        availableBones,
+        availableBlendShapes,
+      };
+
+      // Validate that we have some data to send
+      const hasData = Object.keys(bones).length > 0 || 
+                     Object.keys(blendShapes).length > 0 ||
+                     availableBones.length > 0 ||
+                     availableBlendShapes.length > 0;
+
+      if (!hasData) {
+        // No data to report yet, skip silently
+        return;
+      }
+
       // Report to server
-      await fetch("/api/vrm/state", {
+      const response = await fetch("/api/vrm/state", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bones,
-          blendShapes,
-          availableBones,
-          availableBlendShapes,
-        }),
+        body: JSON.stringify(stateData),
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.warn("Failed to report VRM state:", errorData);
+        return;
+      }
 
       // Notify callback
       if (onStateChange) {
         onStateChange({ bones, blendShapes });
       }
     } catch (error) {
-      // Silently fail
+      // Log error but don't throw to prevent breaking the polling loop
+      console.warn("Error reporting VRM state:", error);
     }
   }, [vrm, enabled, onStateChange]);
 
-  // Set up polling
+  // Set up polling with recursive setTimeout for dynamic intervals
   useEffect(() => {
     if (!enabled || !vrm) {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
       }
+      isPollingRef.current = false;
       return;
     }
 
-    // Poll for commands
-    pollIntervalRef.current = window.setInterval(() => {
-      pollCommands();
-    }, pollInterval);
+    // Reset polling state and interval
+    isPollingRef.current = false;
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+    currentPollIntervalRef.current = pollInterval;
+
+    // Start polling with base interval
+    const startPolling = () => {
+      if (pollTimeoutRef.current === null && enabled && vrm) {
+        pollTimeoutRef.current = window.setTimeout(() => {
+          pollTimeoutRef.current = null;
+          pollCommands();
+        }, currentPollIntervalRef.current);
+      }
+    };
+    
+    startPolling();
 
     // Report state periodically
     const stateInterval = window.setInterval(() => {
@@ -299,10 +382,11 @@ export function useVRMControl({
     reportState();
 
     return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
       }
+      isPollingRef.current = false;
       clearInterval(stateInterval);
     };
   }, [enabled, vrm, pollInterval, pollCommands, reportState]);

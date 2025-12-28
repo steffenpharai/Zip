@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useRef } from "react";
 import { format } from "date-fns";
+import { useProjector } from "@/lib/projector/projector-provider";
+import { LAYOUT, PROJECTOR_LAYOUT } from "@/lib/constants";
 import { useEventBus } from "@/lib/events/hooks";
 import type { ZipEvent } from "@/lib/events/types";
 import SettingsDropdown from "./SettingsDropdown";
@@ -14,6 +16,7 @@ interface Weather {
 
 function WeatherChip() {
   const [weather, setWeather] = useState<Weather | null>(null);
+  const { isProjectorMode } = useProjector();
 
   useEventBus((event: ZipEvent) => {
     if (event.type === "panel.update" && event.panel === "weather") {
@@ -25,14 +28,14 @@ function WeatherChip() {
   if (!weather) {
     return (
       <div className="px-3 py-1.5 rounded-md bg-panel-surface border border-border">
-        <span className="text-text-primary text-sm">Loading...</span>
+        <span className={`text-text-primary ${isProjectorMode ? "text-base" : "text-sm"}`}>Loading...</span>
       </div>
     );
   }
 
   return (
     <div className="px-3 py-1.5 rounded-md bg-panel-surface border border-border">
-      <span className="text-text-primary text-sm">
+      <span className={`text-text-primary ${isProjectorMode ? "text-base" : "text-sm"}`}>
         {Math.round(weather.tempF)}°F • {weather.city}
       </span>
     </div>
@@ -43,6 +46,7 @@ export default function TopBar() {
   const [time, setTime] = useState<Date | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const { isProjectorMode } = useProjector();
 
   useEffect(() => {
     // Only set time on client side to avoid hydration mismatch
@@ -53,24 +57,26 @@ export default function TopBar() {
     return () => clearInterval(interval);
   }, []);
 
+  const topBarHeight = isProjectorMode ? PROJECTOR_LAYOUT.TOP_BAR_HEIGHT : LAYOUT.TOP_BAR_HEIGHT;
+
   return (
     <div
       className="w-full flex items-center justify-between px-4 border-b border-border"
-      style={{ height: "56px" }}
+      style={{ height: `${topBarHeight}px` }}
     >
       {/* Left: ZIP title + Online pill */}
       <div className="flex items-center gap-3">
-        <h1 className="text-text-primary font-semibold text-lg tracking-zip uppercase">
+        <h1 className={`text-text-primary font-semibold tracking-zip uppercase ${isProjectorMode ? "text-xl" : "text-lg"}`}>
           ZIP
         </h1>
         <div className="px-2 py-0.5 rounded-full bg-online-green/20 border border-online-green/40">
-          <span className="text-online-green text-xs font-medium">Online</span>
+          <span className={`text-online-green font-medium ${isProjectorMode ? "text-sm" : "text-xs"}`}>Online</span>
         </div>
       </div>
 
       {/* Center: Time/Date chip */}
       <div className="px-3 py-1.5 rounded-md bg-panel-surface border border-border">
-        <span className="text-text-primary text-sm" suppressHydrationWarning>
+        <span className={`text-text-primary ${isProjectorMode ? "text-base" : "text-sm"}`} suppressHydrationWarning>
           {time ? (
             <>
               {format(time, "HH:mm:ss")} • {format(time, "MMM d, yyyy")}

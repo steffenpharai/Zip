@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LAYOUT } from "@/lib/constants";
+import { LAYOUT, PROJECTOR_LAYOUT } from "@/lib/constants";
+import { useProjector } from "@/lib/projector/projector-provider";
 import { useEventBus, useEmitEvent } from "@/lib/events/hooks";
 import { useHudStore } from "@/lib/state/hudStore";
 import { extractConversation, downloadTranscript } from "@/lib/utils/transcript";
@@ -12,6 +13,8 @@ export default function RightChat() {
   const [events, setEvents] = useState<ZipEvent[]>([]);
   const { resetSession } = useHudStore();
   const emit = useEmitEvent();
+  const { isProjectorMode } = useProjector();
+  const railWidth = isProjectorMode ? PROJECTOR_LAYOUT.RIGHT_RAIL_WIDTH : LAYOUT.RIGHT_RAIL_WIDTH;
 
   useEventBus((event: ZipEvent) => {
     if (event.type === "chat.message") {
@@ -37,7 +40,7 @@ export default function RightChat() {
   return (
     <div
       className="bg-panel-surface border-l border-border flex flex-col h-full"
-      style={{ width: `${LAYOUT.RIGHT_RAIL_WIDTH}px` }}
+      style={{ width: `${railWidth}px` }}
     >
       <div className="p-4 border-b border-border flex items-center justify-between">
         <h3 className="text-text-primary text-sm font-semibold uppercase tracking-wide">

@@ -1,0 +1,75 @@
+[1mdiff --git a/.env.example b/.env.example[m
+[1mindex 0ba58c8..28d4ef1 100644[m
+[1m--- a/.env.example[m
+[1m+++ b/.env.example[m
+[36m@@ -1,65 +1,15 @@[m
+[31m-﻿# ZIP - Jarvis-style HUD Assistant[m
+[31m-# Environment Variables Configuration[m
+[31m-[m
+[31m-# =============================================================================[m
+[31m-# REQUIRED - OpenAI API Configuration[m
+[31m-# =============================================================================[m
+[31m-[m
+[31m-# Your OpenAI API key (required for all AI features)[m
+[31m-# Get your key from: https://platform.openai.com/api-keys[m
+[32m+[m[32m﻿# OpenAI API Configuration[m
+ OPENAI_API_KEY=sk-your-api-key-here[m
+ [m
+[31m-# =============================================================================[m
+[31m-# OPTIONAL - OpenAI Model Configuration[m
+[31m-# =============================================================================[m
+[31m-[m
+[31m-# Realtime model for voice interactions (WebRTC)[m
+[31m-# Default: gpt-4o-realtime-preview-2024-12-17[m
+[32m+[m[32m# OpenAI Model Configuration[m
+ OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview-2024-12-17[m
+[31m-[m
+[31m-# Responses model for chat and tool calling (LangGraph orchestration)[m
+[31m-# Default: gpt-4o[m
+ OPENAI_RESPONSES_MODEL=gpt-4o[m
+[31m-[m
+[31m-# Vision model for image analysis[m
+[31m-# Default: gpt-4o[m
+ OPENAI_VISION_MODEL=gpt-4o[m
+[31m-[m
+[31m-# TTS model for voice fallback (text-to-speech)[m
+[31m-# Default: tts-1[m
+[31m-# Options: tts-1, tts-1-hd[m
+ OPENAI_TTS_MODEL=gpt-4o-mini-tts-2025-12-15[m
+[31m-[m
+[31m-# STT model for voice fallback (speech-to-text)[m
+[31m-# Default: whisper-1[m
+ OPENAI_STT_MODEL=whisper-1[m
+[32m+[m[32mOPENAI_EMBEDDING_MODEL=text-embedding-3-small[m
+ [m
+[31m-# =============================================================================[m
+[31m-# OPTIONAL - ZIP Feature Flags[m
+[31m-# =============================================================================[m
+[31m-[m
+[31m-# Enable Realtime WebRTC voice integration[m
+[31m-# Set to False to disable Realtime (will use fallback STT/TTS)[m
+[31m-# Default: true[m
+[32m+[m[32m# ZIP Configuration[m
+ ZIP_REALTIME_ENABLED=true[m
+[31m-[m
+[31m-# Enable STT/TTS fallback voice pipeline[m
+[31m-# Set to False to disable voice fallback entirely[m
+[31m-# Default: true[m
+ ZIP_VOICE_FALLBACK_ENABLED=true[m
+[31m-[m
+[31m-# Panel update interval in milliseconds[m
+[31m-# How often the left rail panels (system stats, weather, uptime) refresh[m
+[31m-# Default: 2000 (2 seconds)[m
+[31m-ZIP_UPDATE_INTERVAL_MS=2000[m
+[31m-[m
+[31m-# =============================================================================[m
+[31m-# NOTES[m
+[31m-# =============================================================================[m
+[31m-#[m
+[31m-# 1. Copy this file to .env and fill in your OPENAI_API_KEY[m
+[31m-# 2. All other variables are optional and have sensible defaults[m
+[31m-# 3. For production, consider using a secrets manager instead of .env files[m
+[31m-# 4. Weather API (Open-Meteo) requires no API key - it's free and open-source[m
+[31m-#[m
+[31m-# =============================================================================[m
+[32m+[m[32mZIP_UPDATE_INTERVAL_MS=2000[m[41m[m

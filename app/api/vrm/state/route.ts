@@ -27,7 +27,38 @@ function getSessionId(request: NextRequest): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    // Check content type
+    const contentType = request.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      return NextResponse.json(
+        { error: "Content-Type must be application/json" },
+        { status: 400 }
+      );
+    }
+
+    // Read the raw body text first to check if it's empty
+    const text = await request.text();
+    
+    // Handle empty body
+    if (!text || text.trim().length === 0) {
+      return NextResponse.json(
+        { error: "Request body is empty" },
+        { status: 400 }
+      );
+    }
+
+    // Parse JSON with error handling
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch (parseError) {
+      console.error("Error parsing JSON:", parseError);
+      return NextResponse.json(
+        { error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
+    }
+
     const { bones, blendShapes, availableBones, availableBlendShapes } = body;
 
     const sessionId = getSessionId(request);
@@ -61,7 +92,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Error storing VRM state:", error);
     return NextResponse.json(
-      { error: "Failed to store state" },
+      { error: "Failed to store state", details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }

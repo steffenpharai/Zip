@@ -54,7 +54,7 @@ function VRMModel({
   useVRMControl({
     vrm: vrmRef.current,
     enabled: isLoaded,
-    pollInterval: 100,
+    pollInterval: 500, // Increased from 100ms to reduce request flooding
   });
 
   // Idle animation state
