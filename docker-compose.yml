@@ -1,0 +1,40 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        OPENAI_API_KEY: ${OPENAI_API_KEY}
+        OPENAI_REALTIME_MODEL: ${OPENAI_REALTIME_MODEL:-}
+        OPENAI_RESPONSES_MODEL: ${OPENAI_RESPONSES_MODEL:-}
+        OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-}
+        OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-}
+        OPENAI_STT_MODEL: ${OPENAI_STT_MODEL:-}
+        ZIP_REALTIME_ENABLED: ${ZIP_REALTIME_ENABLED:-true}
+        ZIP_VOICE_FALLBACK_ENABLED: ${ZIP_VOICE_FALLBACK_ENABLED:-true}
+    container_name: zip-app-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for hot reloading (exclude node_modules and .next)
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+      # Mount data directory for persistence
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+      - NEXT_TELEMETRY_DISABLED=1
+    env_file:
+      - .env
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    # Ensure logs are output to console
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+

@@ -1,0 +1,50 @@
+# Development Dockerfile with hot reloading support
+FROM node:20-alpine
+
+# Install build dependencies for native modules (better-sqlite3)
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    sqlite
+
+# Accept build arguments for environment variables
+ARG OPENAI_API_KEY
+ARG OPENAI_REALTIME_MODEL
+ARG OPENAI_RESPONSES_MODEL
+ARG OPENAI_VISION_MODEL
+ARG OPENAI_TTS_MODEL
+ARG OPENAI_STT_MODEL
+ARG ZIP_REALTIME_ENABLED
+ARG ZIP_VOICE_FALLBACK_ENABLED
+
+# Set environment variables for development
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV OPENAI_API_KEY=${OPENAI_API_KEY}
+ENV OPENAI_REALTIME_MODEL=${OPENAI_REALTIME_MODEL}
+ENV OPENAI_RESPONSES_MODEL=${OPENAI_RESPONSES_MODEL}
+ENV OPENAI_VISION_MODEL=${OPENAI_VISION_MODEL}
+ENV OPENAI_TTS_MODEL=${OPENAI_TTS_MODEL}
+ENV OPENAI_STT_MODEL=${OPENAI_STT_MODEL}
+ENV ZIP_REALTIME_ENABLED=${ZIP_REALTIME_ENABLED}
+ENV ZIP_VOICE_FALLBACK_ENABLED=${ZIP_VOICE_FALLBACK_ENABLED}
+
+# Enable polling for file watching (useful for Docker volumes)
+ENV WATCHPACK_POLLING=true
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies (use legacy-peer-deps for @pixiv/three-vrm compatibility)
+RUN npm ci --legacy-peer-deps
+
+# Expose port
+EXPOSE 3000
+
+# Run development server with hot reloading
+CMD ["npm", "run", "dev"]
+

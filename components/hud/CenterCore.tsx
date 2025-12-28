@@ -1,0 +1,71 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+import { useHudStore } from "@/lib/state/hudStore";
+import ControlDock from "./ControlDock";
+import { useEventBus } from "@/lib/events/hooks";
+import type { ZipEvent, BrainActivityEvent } from "@/lib/events/types";
+import { formatActivityMessage } from "@/lib/orchestrators/utils/activity-formatter";
+
+const ZipFaceStage = dynamic(() => import("./ZipFaceStage"), { ssr: false });
+
+const STATUS_MESSAGES: Record<string, string> = {
+  IDLE: "hello",
+  WAKE_LISTEN: "Listening for wake word…",
+  LISTENING: "Listening…",
+  THINKING: "Thinking…",
+  TOOL_RUNNING: "Processing…",
+  SPEAKING: "Speaking…",
+  ERROR: "Error",
+};
+
+export default function CenterCore() {
+  const { state } = useHudStore();
+  const [activity, setActivity] = useState<BrainActivityEvent["activity"][]>([]);
+  const [hasHadActivity, setHasHadActivity] = useState(false);
+
+  useEventBus((event: ZipEvent) => {
+    if (event.type === "brain.activity") {
+      setHasHadActivity(true);
+      setActivity((prev) => {
+        const updated = [...prev, event.activity];
+        // Keep last 10 activities
+        return updated.slice(-10);
+      });
+    }
+  });
+
+  // Clear activity when mode changes to IDLE and reset hasHadActivity flag
+  useEffect(() => {
+    if (state.mode === "IDLE") {
+      setActivity([]);
+      // Reset hasHadActivity after a delay to allow showing "hello" again
+      const timer = setTimeout(() => {
+        setHasHadActivity(false);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [state.mode]);
+
+  const currentActivity = activity[activity.length - 1];
+  // Only show activity message if we've had activity and there's current activity
+  // Otherwise show status message (which will be "hello" for IDLE on initial load)
+  const statusMessage = hasHadActivity && currentActivity
+    ? formatActivityMessage(currentActivity)
+    : STATUS_MESSAGES[state.mode] || STATUS_MESSAGES.IDLE;
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-8">
+      <div className="flex flex-col items-center gap-4">
+        <h2 className="text-text-primary text-2xl font-semibold tracking-zip uppercase">
+          ZIP
+        </h2>
+        <ZipFaceStage mode={state.mode} />
+        <p className="text-text-muted text-xs">{statusMessage}</p>
+      </div>
+      <ControlDock />
+    </div>
+  );
+}
+
