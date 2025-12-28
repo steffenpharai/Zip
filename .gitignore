@@ -34,3 +34,13 @@ next-env.d.ts
 # artifacts
 /artifacts
 
+# data files
+data/*.db
+data/*.log
+data/traces/*.jsonl
+!data/.gitkeep
+
+# generated VRM analysis files
+vrm_*.json
+vrm_*.txt
+
