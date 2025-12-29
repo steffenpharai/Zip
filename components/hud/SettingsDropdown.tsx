@@ -7,7 +7,7 @@ import { useProjector } from "@/lib/projector/projector-provider";
 interface SettingsDropdownProps {
   isOpen: boolean;
   onClose: () => void;
-  buttonRef: React.RefObject<HTMLButtonElement>;
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
 }
 
 export default function SettingsDropdown({

@@ -230,7 +230,7 @@ export function useRealtime() {
         const audioBuffer = await audioContextRef.current.decodeAudioData(audioData.buffer);
         
         // Generate message ID for this speech segment
-        const messageId = `tts-fallback-${Date.now()}-${Math.random().toString(36).substring(7))}`;
+        const messageId = `tts-fallback-${Date.now()}-${Math.random().toString(36).substring(7)}`;
         const traceId = sessionIdRef.current || undefined;
         currentSpeechMessageIdRef.current = messageId;
 
@@ -429,7 +429,7 @@ export function useRealtime() {
             // Decode and play audio
             audioContextRef.current.decodeAudioData(audioData).then((audioBuffer) => {
               // Generate message ID for this speech segment
-              const messageId = `realtime-${Date.now()}-${Math.random().toString(36).substring(7))}`;
+              const messageId = `realtime-${Date.now()}-${Math.random().toString(36).substring(7)}`;
               const traceId = sessionIdRef.current || undefined;
               currentSpeechMessageIdRef.current = messageId;
 
@@ -447,48 +447,50 @@ export function useRealtime() {
                 audioTelemetryCleanupRef.current();
               }
               
-              audioTelemetryCleanupRef.current = analyzeAudioBuffer(
-                audioBuffer,
-                audioContextRef.current,
-                {
-                  onLevel: (level: number) => {
-                    emit({
-                      type: "speech.level",
-                      level,
-                      at: performance.now(),
-                    });
-                  },
-                }
-              );
+              if (audioContextRef.current) {
+                audioTelemetryCleanupRef.current = analyzeAudioBuffer(
+                  audioBuffer,
+                  audioContextRef.current,
+                  {
+                    onLevel: (level: number) => {
+                      emit({
+                        type: "speech.level",
+                        level,
+                        at: performance.now(),
+                      });
+                    },
+                  }
+                );
 
-              // Create source for playback (separate from telemetry)
-              const source = audioContextRef.current.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(audioContextRef.current.destination);
-              source.start(0);
-              setMode(ZIP_MODES.SPEAKING);
-              isSpeakingRef.current = true;
+                // Create source for playback (separate from telemetry)
+                const source = audioContextRef.current.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContextRef.current.destination);
+                source.start(0);
+                setMode(ZIP_MODES.SPEAKING);
+                isSpeakingRef.current = true;
 
-              source.onended = () => {
-                // Cleanup telemetry
-                if (audioTelemetryCleanupRef.current) {
-                  audioTelemetryCleanupRef.current();
-                  audioTelemetryCleanupRef.current = null;
-                }
+                source.onended = () => {
+                  // Cleanup telemetry
+                  if (audioTelemetryCleanupRef.current) {
+                    audioTelemetryCleanupRef.current();
+                    audioTelemetryCleanupRef.current = null;
+                  }
 
-                // Emit speech.end event
-                emit({
-                  type: "speech.end",
-                  source: "realtime",
-                  messageId,
-                  traceId,
-                  endedAt: Date.now(),
-                });
+                  // Emit speech.end event
+                  emit({
+                    type: "speech.end",
+                    source: "realtime",
+                    messageId,
+                    traceId,
+                    endedAt: Date.now(),
+                  });
 
-                setMode(ZIP_MODES.IDLE);
-                isSpeakingRef.current = false;
-                currentSpeechMessageIdRef.current = null;
-              };
+                  setMode(ZIP_MODES.IDLE);
+                  isSpeakingRef.current = false;
+                  currentSpeechMessageIdRef.current = null;
+                };
+              }
             }).catch((err) => {
               console.error("Audio decode error:", err);
             });

@@ -150,8 +150,11 @@ export async function POST(request: NextRequest) {
 
     // Handle confirmation requirement
     if (result.requiresConfirmation) {
-      // Format as yes/no question for voice
-      const confirmationText = `${result.requiresConfirmation.message} Please say "yes" to confirm or "no" to cancel.`;
+      // Use the generated response (which explains what action is pending) 
+      // and append confirmation prompt for voice interaction
+      const confirmationText = result.response 
+        ? `${result.response} Please say "yes" to confirm or "no" to cancel.`
+        : `${result.requiresConfirmation.message} Please say "yes" to confirm or "no" to cancel.`;
       
       return NextResponse.json({
         assistantText: confirmationText,

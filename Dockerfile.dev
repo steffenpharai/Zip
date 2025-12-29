@@ -39,7 +39,7 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (use legacy-peer-deps for @pixiv/three-vrm compatibility)
+# Install dependencies (use legacy-peer-deps for React Three Fiber compatibility)
 RUN npm ci --legacy-peer-deps
 
 # Expose port

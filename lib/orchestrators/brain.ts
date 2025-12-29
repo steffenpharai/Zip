@@ -110,6 +110,12 @@ export interface OrchestrationCallbacks {
 // Global activity tracker instance (will be set per request)
 let currentActivityTracker: ActivityTracker | null = null;
 let currentCallbacks: OrchestrationCallbacks | null = null;
+let currentSkipConfirmation: boolean = false;
+
+// Export getter for skipConfirmation so nodes can access it
+export function getSkipConfirmation(): boolean {
+  return currentSkipConfirmation;
+}
 
 /**
  * Input node - processes and validates input
@@ -561,8 +567,10 @@ export async function orchestrateConversation(
   // Store in global context for nodes to access
   const previousTracker = currentActivityTracker;
   const previousCallbacks = currentCallbacks;
+  const previousSkipConfirmation = currentSkipConfirmation;
   currentActivityTracker = activityTracker;
   currentCallbacks = options.callbacks || null;
+  currentSkipConfirmation = options.skipConfirmation || false;
 
   try {
     // Initialize state with required fields
@@ -614,6 +622,7 @@ export async function orchestrateConversation(
     // Restore previous context
     currentActivityTracker = previousTracker;
     currentCallbacks = previousCallbacks;
+    currentSkipConfirmation = previousSkipConfirmation;
   }
 }
 

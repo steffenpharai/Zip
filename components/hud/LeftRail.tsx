@@ -5,7 +5,7 @@ import { useProjector } from "@/lib/projector/projector-provider";
 import SystemStatsPanel from "./panels/SystemStatsPanel";
 import WeatherPanel from "./panels/WeatherPanel";
 import CameraPanel from "./panels/CameraPanel";
-import UptimePanel from "./panels/UptimePanel";
+import HoloFaceDiagnosticPanel from "./panels/HoloFaceDiagnosticPanel";
 
 export default function LeftRail() {
   const { isProjectorMode } = useProjector();
@@ -20,7 +20,7 @@ export default function LeftRail() {
         <SystemStatsPanel />
         <WeatherPanel />
         <CameraPanel />
-        <UptimePanel />
+        <HoloFaceDiagnosticPanel />
       </div>
     </div>
   );

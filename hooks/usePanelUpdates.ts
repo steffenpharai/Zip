@@ -141,13 +141,33 @@ export function usePanelUpdates() {
       }
     };
 
-    // Initial update
-    updatePanels();
+    // Defer initial update to allow page to render first
+    // Use requestIdleCallback if available, otherwise setTimeout
+    let initialUpdateIdleCallback: number | null = null;
+    let initialUpdateTimeout: NodeJS.Timeout | null = null;
+    
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      initialUpdateIdleCallback = window.requestIdleCallback(
+        () => updatePanels(),
+        { timeout: 1000 } // Start after 1s even if not idle
+      );
+    } else {
+      // Fallback: delay by 750ms (middle of 500-1000ms range)
+      initialUpdateTimeout = setTimeout(updatePanels, 750);
+    }
 
-    // Set up interval
+    // Set up interval for subsequent updates
     const interval = setInterval(updatePanels, INTERVALS.PANEL_UPDATE_MS);
 
-    return () => clearInterval(interval);
+    return () => {
+      if (initialUpdateIdleCallback !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(initialUpdateIdleCallback);
+      }
+      if (initialUpdateTimeout !== null) {
+        clearTimeout(initialUpdateTimeout);
+      }
+      clearInterval(interval);
+    };
   }, [emit, state.sessionStartTime, state.commandsCount, state.cameraEnabled, userLocation]);
 }
 

@@ -43,11 +43,6 @@ export function formatActivityMessage(activity: BrainActivityEvent["activity"]):
           analyze_image: "Analyzing image",
           doc_search: "Searching documents",
           doc_answer: "Answering from documents",
-          get_vrm_info: "Querying VRM avatar",
-          set_vrm_bone: "Moving avatar bone",
-          set_vrm_expression: "Setting avatar expression",
-          set_vrm_pose: "Creating avatar pose",
-          reset_vrm_pose: "Resetting avatar pose",
         };
         return toolNames[activity.tool] || `Executing ${activity.tool}...`;
       }

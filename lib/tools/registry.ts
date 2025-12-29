@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { getSystemStats as getSystemStatsClient } from "./implementations/system";
 import { getSystemStats as getSystemStatsServer } from "./implementations/system-server";
 import { getWeather } from "./implementations/weather";
 import { getUptime } from "./implementations/uptime";
+
 import { setCameraEnabled } from "./implementations/camera";
 import { analyzeImage, analyzeImageSchema, analyzeImageOutputSchema } from "./implementations/vision";
 import { webSearch, webSearchSchema, webSearchOutputSchema } from "./implementations/web-search";
@@ -15,19 +15,10 @@ import { calendarCreateEvent, calendarCreateEventSchema, calendarCreateEventOutp
 import { ingestDocument, ingestDocumentSchema, ingestDocumentOutputSchema } from "./implementations/docs/ingest";
 import { docSearch, docSearchSchema, docSearchOutputSchema } from "./implementations/docs/search";
 import { docAnswer, docAnswerSchema, docAnswerOutputSchema } from "./implementations/docs/answer";
-import { 
-  getVRMInfo, getVRMInfoSchema, getVRMInfoOutputSchema,
-  setVRMBone, setVRMBoneSchema, setVRMBoneOutputSchema,
-  setVRMExpression, setVRMExpressionSchema, setVRMExpressionOutputSchema,
-  setVRMPose, setVRMPoseSchema, setVRMPoseOutputSchema,
-  resetVRMPose, resetVRMPoseSchema, resetVRMPoseOutputSchema,
-} from "./implementations/vrm-control";
 
 // Use server version for API routes, client version for direct calls
-const getSystemStats =
-  typeof window === "undefined"
-    ? getSystemStatsServer
-    : getSystemStatsClient;
+// Always use server version since tools are called from API routes
+const getSystemStats = getSystemStatsServer;
 
 export type PermissionTier = "READ" | "WRITE" | "ACT" | "ADMIN";
 
@@ -298,52 +289,6 @@ toolRegistry.set("doc_answer", {
   outputSchema: docAnswerOutputSchema,
   permissionTier: "READ",
   execute: (input: unknown) => docAnswer(input as z.infer<typeof docAnswerSchema>),
-});
-
-// VRM Control Tools
-toolRegistry.set("get_vrm_info", {
-  name: "get_vrm_info",
-  description: "Get information about the VRM avatar including available bones, blend shapes, and current state. Use this to understand what bones and expressions are available before controlling them.",
-  inputSchema: getVRMInfoSchema,
-  outputSchema: getVRMInfoOutputSchema,
-  permissionTier: "READ",
-  execute: () => getVRMInfo(),
-});
-
-toolRegistry.set("set_vrm_bone", {
-  name: "set_vrm_bone",
-  description: "Set the rotation of a specific humanoid bone. Use this to move individual body parts. Rotation values are in radians by default, or degrees if useDegrees is true. Available bones: hips, spine, chest, upperChest, neck, head, leftShoulder, leftUpperArm, leftLowerArm, leftHand, rightShoulder, rightUpperArm, rightLowerArm, rightHand, leftUpperLeg, leftLowerLeg, leftFoot, rightUpperLeg, rightLowerLeg, rightFoot.",
-  inputSchema: setVRMBoneSchema,
-  outputSchema: setVRMBoneOutputSchema,
-  permissionTier: "ACT",
-  execute: (input: unknown) => setVRMBone(input as z.infer<typeof setVRMBoneSchema>),
-});
-
-toolRegistry.set("set_vrm_expression", {
-  name: "set_vrm_expression",
-  description: "Set a blend shape/expression value for the VRM avatar. Use this to control facial expressions and mouth shapes. Value must be between 0.0 and 1.0. Available expressions include: Blink, Fun, Sorrow, Angry, Surprised, A, aa, O, oh, I, ee, U, uu, E.",
-  inputSchema: setVRMExpressionSchema,
-  outputSchema: setVRMExpressionOutputSchema,
-  permissionTier: "ACT",
-  execute: (input: unknown) => setVRMExpression(input as z.infer<typeof setVRMExpressionSchema>),
-});
-
-toolRegistry.set("set_vrm_pose", {
-  name: "set_vrm_pose",
-  description: "Set multiple bones at once to create a complex pose. Use this when you need to move multiple body parts simultaneously for natural poses like waving, pointing, or standing in a specific position.",
-  inputSchema: setVRMPoseSchema,
-  outputSchema: setVRMPoseOutputSchema,
-  permissionTier: "ACT",
-  execute: (input: unknown) => setVRMPose(input as z.infer<typeof setVRMPoseSchema>),
-});
-
-toolRegistry.set("reset_vrm_pose", {
-  name: "reset_vrm_pose",
-  description: "Reset all bones to their default/neutral pose. Use this to return the avatar to a standing rest position.",
-  inputSchema: resetVRMPoseSchema,
-  outputSchema: resetVRMPoseOutputSchema,
-  permissionTier: "ACT",
-  execute: () => resetVRMPose(),
 });
 
 export function getTool(name: string): ToolDefinition | undefined {

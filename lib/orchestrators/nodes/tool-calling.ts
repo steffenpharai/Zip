@@ -15,6 +15,7 @@ import { formatContextData } from "../utils/context-formatter";
 import { filterConversationHistory } from "../utils/context-filter";
 import type { ActivityTracker } from "../utils/activity-tracker";
 import type { OrchestrationCallbacks } from "../brain";
+import { getSkipConfirmation } from "../brain";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -34,17 +35,20 @@ export async function toolCallingNode(
   const nodeStartTime = Date.now();
   const model = process.env.OPENAI_RESPONSES_MODEL || "gpt-4o";
   const tools = getAllTools();
-  const skipConfirmation = false; // This will be set by the caller if needed
+  const skipConfirmation = getSkipConfirmation();
 
   console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Starting tool calling node`);
-  console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Model: ${model}, Available tools: ${tools.length}`);
+  console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Model: ${model}, Available tools: ${tools.length}, skipConfirmation: ${skipConfirmation}`);
 
   // Filter conversation history to include only relevant context
-  const filteredHistory = await filterConversationHistory(
-    state.userMessage,
-    state.conversationHistory,
-    state.requestId
-  );
+  // Skip filtering if skipConfirmation is true (confirmation requests need full context)
+  const filteredHistory = skipConfirmation
+    ? state.conversationHistory
+    : await filterConversationHistory(
+        state.userMessage,
+        state.conversationHistory,
+        state.requestId
+      );
 
   // Build system prompt with memory and context
   const memoryContext = state.pinnedMemory || "";
@@ -155,6 +159,7 @@ export async function toolCallingNode(
           role: "assistant",
           content: accumulatedContent || null,
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+          refusal: null,
         };
       }
     }
@@ -165,19 +170,22 @@ export async function toolCallingNode(
         role: "assistant",
         content: accumulatedContent || null,
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        refusal: null,
       };
     }
 
     // Add assistant message to conversation
-    currentMessages.push(assistantMessage);
+    if (assistantMessage) {
+      currentMessages.push(assistantMessage);
+    }
 
     // If there's text content, we might be done
-    if (assistantMessage.content) {
+    if (assistantMessage && assistantMessage.content) {
       finalResponse = assistantMessage.content;
     }
 
     // Handle tool calls
-    if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+    if (assistantMessage && assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
       const toolCallResults: Array<{ tool_call_id: string; role: "tool"; content: string }> = [];
 
       for (const toolCall of assistantMessage.tool_calls) {
@@ -201,11 +209,54 @@ export async function toolCallingNode(
 
           // Check if tool requires confirmation
           const tool = tools.find((t) => t.name === toolName);
+          console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Tool ${toolName} requires confirmation: ${tool ? requiresConfirmation(tool.permissionTier) : 'unknown'}, skipConfirmation: ${skipConfirmation}`);
           if (tool && requiresConfirmation(tool.permissionTier) && !skipConfirmation) {
             if (activityTracker) {
               activityTracker.emitToolComplete(toolName, { requiresConfirmation: true }, state.requestId);
             }
+
+            // Add tool result indicating confirmation is needed
+            const confirmationToolResult: Array<{ tool_call_id: string; role: "tool"; content: string }> = [
+              {
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({ requiresConfirmation: true, tool: toolName, input: toolInput }),
+              },
+            ];
+
+            // Add tool results to messages for context
+            const messagesWithToolCall = [...currentMessages, ...confirmationToolResult];
+
+            // Generate a response explaining what action is pending confirmation
+            console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Generating response for tool requiring confirmation: ${toolName}`);
+            
+            const responseStream = await openai.chat.completions.create({
+              model,
+              messages: messagesWithToolCall,
+              tools: undefined, // Don't allow more tool calls, just generate a response
+              tool_choice: undefined,
+              stream: true,
+            });
+
+            let confirmationResponse = "";
+            for await (const chunk of responseStream) {
+              const choice = chunk.choices[0];
+              if (!choice) continue;
+
+              const delta = choice.delta;
+              if (delta.content) {
+                confirmationResponse += delta.content;
+                // Stream text deltas to callback
+                if (callbacks?.onTextDelta) {
+                  callbacks.onTextDelta(delta.content);
+                }
+              }
+            }
+
+            console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Generated confirmation response (${confirmationResponse.length} chars)`);
+
             return {
+              response: confirmationResponse || `I'll execute ${toolName} for you. Please confirm to proceed.`,
               requiresConfirmation: {
                 tool: toolName,
                 input: toolInput,
@@ -215,6 +266,7 @@ export async function toolCallingNode(
           }
 
           // Execute tool
+          console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Executing tool ${toolName} (skipConfirmation: ${skipConfirmation})`);
           const result = await executeTool(
             toolName,
             toolInput,
@@ -224,6 +276,7 @@ export async function toolCallingNode(
               userInput: state.userMessage,
             }
           );
+          console.log(`[LANGGRAPH] [${state.requestId}] [TOOL_CALLING] Tool ${toolName} execution result: success=${result.success}`);
 
           const toolDuration = Date.now() - toolStartTime;
           const toolResult = result.success ? result.result : { error: result.error };

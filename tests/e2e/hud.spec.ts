@@ -12,21 +12,25 @@ test.describe("HUD Page", () => {
     const onlinePill = page.locator("text=Online");
     await expect(onlinePill).toBeVisible();
 
-    // Check left rail exists with 4 cards
-    const leftRail = page.locator('text=System Stats').locator('..').locator('..');
+    // Check left rail exists with 3 cards (System now includes Uptime tab)
+    const leftRail = page.locator('text=System').locator('..').locator('..');
     await expect(leftRail).toBeVisible();
 
-    const systemStatsPanel = page.getByRole("heading", { name: "System Stats" });
+    const systemStatsPanel = page.getByRole("heading", { name: "System" });
     await expect(systemStatsPanel).toBeVisible();
+
+    // Check that System panel has both Stats and Uptime tabs
+    const statsTab = page.getByRole("button", { name: "Stats" });
+    await expect(statsTab).toBeVisible();
+
+    const uptimeTab = page.getByRole("button", { name: "Uptime" });
+    await expect(uptimeTab).toBeVisible();
 
     const weatherPanel = page.getByRole("heading", { name: "Weather" });
     await expect(weatherPanel).toBeVisible();
 
     const cameraPanel = page.getByRole("heading", { name: "Camera" });
     await expect(cameraPanel).toBeVisible();
-
-    const uptimePanel = page.getByRole("heading", { name: "System Uptime" });
-    await expect(uptimePanel).toBeVisible();
 
     // Check right rail conversation exists
     const conversationHeader = page.getByRole("heading", { name: "Conversation" });

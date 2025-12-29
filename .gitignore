@@ -44,3 +44,10 @@ data/traces/*.jsonl
 vrm_*.json
 vrm_*.txt
 
+# Cursor IDE files
+.cursor/
+.cursorrules
+
+# temporary documentation files
+head.md
+

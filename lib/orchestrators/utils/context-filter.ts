@@ -13,6 +13,8 @@ import { generateEmbedding, generateEmbeddings, cosineSimilarity } from "@/lib/u
  */
 const MIN_RELEVANCE_THRESHOLD = 0.5; // Minimum cosine similarity to include a message
 const MAX_HISTORY_MESSAGES = 20; // Maximum total messages to include
+const SHORT_CONVERSATION_THRESHOLD = 5; // If conversation is shorter than this, include all messages
+const MIN_RECENT_MESSAGES = 3; // Minimum recent messages to always include
 
 /**
  * Pronouns and references that indicate a follow-up question

@@ -98,10 +98,22 @@ export async function POST(request: NextRequest) {
               return;
             }
             
+            // Enhance conversation history to include tool call context
+            // This helps the LLM understand it should execute the tool
+            const enhancedHistory = [
+              ...validated.conversationHistory,
+              {
+                role: "user" as const,
+                content: `Please execute the ${validated.confirmation.tool} tool with the confirmed parameters.`,
+              },
+            ];
+            
+            console.log(`[agent] Confirmation re-run: tool=${validated.confirmation.tool}, skipConfirmation=true`);
+            
             // Re-run with confirmation
             const result = await orchestrateConversationWithBrain(
               validated.message,
-              validated.conversationHistory,
+              enhancedHistory,
               {
                 requestId: traceContext.requestId,
                 skipConfirmation: true,

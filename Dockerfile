@@ -34,8 +34,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (use legacy-peer-deps for React Three Fiber compatibility)
+RUN npm ci --legacy-peer-deps
 
 # Copy source code
 COPY . .
@@ -85,8 +85,8 @@ RUN addgroup --system --gid 1001 nodejs && \
 # Copy package files
 COPY package*.json ./
 
-# Install only production dependencies
-RUN npm ci --only=production && \
+# Install only production dependencies (use legacy-peer-deps for React Three Fiber compatibility)
+RUN npm ci --only=production --legacy-peer-deps && \
     npm cache clean --force
 
 # Copy built application from builder

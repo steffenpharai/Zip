@@ -2,6 +2,20 @@
 
 A production-grade, state-of-the-art (2026) Jarvis-style HUD assistant built with Next.js, TypeScript, and Tailwind CSS. ZIP provides a pixel-perfect UX matching the reference design with OpenAI Realtime voice integration, tool calling, and an event-driven architecture.
 
+## Features
+
+- **🎤 Realtime Voice Interface**: Low-latency voice interactions via OpenAI Realtime WebRTC with barge-in support
+- **🤖 AI Brain Orchestration**: Intelligent request routing with research and workflow sub-graphs
+- **💬 Multi-Modal Interaction**: Voice, text chat, and vision (webcam analysis) support
+- **🎭 HoloFace Display**: Advanced 3D holographic face with state-driven animations and shader effects
+- **🧠 Memory System**: User-controlled pinned memory with natural language commands
+- **📚 Document Intelligence**: PDF ingestion, vector search, and Q&A with citations
+- **🌐 Web Research**: Automated research pipeline with source validation and citations
+- **📝 Notes & Timers**: Full CRUD operations for notes and server-side timer reminders
+- **🔒 Security**: Permission-based tool access, input validation, and audit logging
+- **📊 Observability**: Comprehensive tracing, audit logs, and request tracking
+- **🎨 Projector Mode**: Optimized display mode for large-screen presentations
+
 ## Quickstart
 
 1. **Install dependencies:**
@@ -114,6 +128,7 @@ docker-compose down
 - Build dependencies are included in Dockerfiles (python3, make, g++)
 - If issues persist, the Dockerfiles use `node:20-alpine` which includes necessary tools
 
+
 ## Architecture Overview
 
 ### Event-Driven Architecture
@@ -141,7 +156,7 @@ User Input → Event Bus → State Reducer → UI Updates
 11. **Rate Limiting** (`lib/middleware/rate-limit.ts`): In-memory rate limiter for tool endpoints
 12. **Voice Persona** (`lib/voice/voicePersona.ts`): JARVIS-inspired voice persona configuration for Realtime and TTS
 13. **MCP Router Interface** (`lib/integrations/mcp-router.ts`): Stub interface for future Model Context Protocol integrations
-14. **VRM Avatar Control** (`lib/vrm/`, `components/hud/ZipFaceStage.tsx`): Full AI control over VRM avatar with bone rotation, expression control, and pose management
+14. **HoloFace** (`components/hud/HoloFace.tsx`): Advanced 3D holographic-style face with state-driven animations and shader effects
 15. **Projector Mode** (`lib/projector/`): Display mode optimized for projector presentations with larger text and adjusted layouts
 16. **Context Filtering** (`lib/orchestrators/utils/context-filter.ts`): Intelligent conversation history filtering using semantic similarity to include only relevant messages
 17. **Embeddings Utility** (`lib/utils/embeddings.ts`): Shared embedding utilities for semantic similarity operations across document search and context filtering
@@ -450,87 +465,6 @@ Lists calendar events (integration not configured - returns placeholder message)
 - `message`: "Calendar integration not configured..."
 - `events`: []
 
-#### VRM Avatar Control Tools
-
-ZIP includes full AI control over the VRM (VRoid Model) avatar displayed in the HUD. The AI can query the avatar structure, control bone rotations, set facial expressions, and create complex poses.
-
-##### `get_vrm_info` (READ)
-Get information about the VRM avatar including available bones, blend shapes, and current state.
-
-**Output:**
-- `availableBones`: Array of available bone names (20 humanoid bones)
-- `availableBlendShapes`: Array of available expression names (Surprised, aa, oh, ee)
-- `bones`: Current bone positions and rotations
-- `blendShapes`: Current blend shape values
-
-##### `set_vrm_bone` (ACT)
-Set the rotation of a specific humanoid bone. Use this to move individual body parts.
-
-**Input:**
-- `boneName`: One of 20 humanoid bones (hips, spine, chest, upperChest, neck, head, leftShoulder, leftUpperArm, leftLowerArm, leftHand, rightShoulder, rightUpperArm, rightLowerArm, rightHand, leftUpperLeg, leftLowerLeg, leftFoot, rightUpperLeg, rightLowerLeg, rightFoot)
-- `rotationX`, `rotationY`, `rotationZ`: Rotation values (radians by default)
-- `useDegrees`: Optional boolean, if true rotations are in degrees
-
-**Output:**
-- `success`: boolean
-- `commandId`: Command ID for tracking
-- `boneName`: Bone name
-- `rotation`: Applied rotation values
-
-##### `set_vrm_expression` (ACT)
-Set a blend shape/expression value for the VRM avatar. Controls facial expressions and mouth shapes.
-
-**Input:**
-- `blendShapeName`: Expression name (Surprised, aa, oh, ee)
-- `value`: Value from 0.0 (inactive) to 1.0 (fully active)
-
-**Output:**
-- `success`: boolean
-- `commandId`: Command ID for tracking
-- `blendShapeName`: Expression name
-- `value`: Applied value
-
-##### `set_vrm_pose` (ACT)
-Set multiple bones at once to create a complex pose. Use this for natural poses like waving, pointing, or standing in specific positions.
-
-**Input:**
-- `pose`: Array of bone rotations, each with:
-  - `boneName`: Bone name
-  - `rotationX`, `rotationY`, `rotationZ`: Rotation values
-  - `useDegrees`: Optional boolean
-
-**Output:**
-- `success`: boolean
-- `commandId`: Command ID for tracking
-- `bonesSet`: Number of bones set
-
-##### `reset_vrm_pose` (ACT)
-Reset all bones to their default/neutral pose (T-pose).
-
-**Output:**
-- `success`: boolean
-- `commandId`: Command ID for tracking
-
-**Available Bones:**
-- Spine: hips, spine, chest, upperChest, neck, head
-- Left Arm: leftShoulder, leftUpperArm, leftLowerArm, leftHand
-- Right Arm: rightShoulder, rightUpperArm, rightLowerArm, rightHand
-- Left Leg: leftUpperLeg, leftLowerLeg, leftFoot
-- Right Leg: rightUpperLeg, rightLowerLeg, rightFoot
-
-**Available Expressions:**
-- `Surprised` - Surprised facial expression
-- `aa` - Open mouth "ah" sound
-- `oh` - Round mouth "oh" sound
-- `ee` - Smile mouth "ee" sound
-
-**Rotation System:**
-- Default units: Radians (use `useDegrees: true` for degrees)
-- Coordinate system: X = pitch, Y = yaw, Z = roll
-- Rotation limits: Automatically clamped to safe ranges to prevent unnatural poses
-- Initial pose: T-pose (all bones at 0° rotation)
-
-See `docs/VRM_STRUCTURE.md` for complete VRM structure documentation.
 
 ## AI Capabilities
 
@@ -625,18 +559,49 @@ See `docs/VRM_STRUCTURE.md` for complete VRM structure documentation.
 - **Search**: Full-text search across note titles and content
 - **Reminders**: Timers send reminders via chat when they fire
 
-### VRM Avatar Control
-- **Full AI Control**: AI can understand and control the VRM avatar through natural language
-- **Bone Control**: Rotate individual bones (head, arms, legs, etc.) with precise control
-- **Expression Control**: Set facial expressions and mouth shapes for lip-sync
-- **Complex Poses**: Create multi-bone poses for natural movements (waving, pointing, etc.)
-- **State Querying**: AI can query current avatar state before making changes
-- **Command Queue**: Server-side command queue with client polling (100ms interval)
-- **State Reporting**: Client reports VRM state every 2 seconds for AI awareness
-- **Rotation Limits**: Automatic clamping to safe ranges prevents unnatural poses
-- **Initial Pose**: VRM loads in T-pose (all bones at 0° rotation)
-- **Integration**: Fully integrated with LangGraph orchestrator and frontend
-- **Documentation**: Complete VRM structure documented in `docs/VRM_STRUCTURE.md` and integration guide in `docs/VRM_INTEGRATION.md`
+### HoloFace
+
+ZIP features a world-class 3D holographic face display with advanced post-processing effects, following React Three Fiber and drei best practices.
+
+**Visual Design:**
+- **Procedural Geometry**: Sphere-based head with protruding geometric eyes and mouth (properly positioned for visibility)
+- **Holographic Shaders**: Custom GLSL shaders with:
+  - **Multi-frequency Scanlines**: Layered horizontal scanlines with varying speeds for depth
+  - **Enhanced Fresnel Glow**: Strong edge lighting effect that intensifies at viewing angles
+  - **Additive Blending**: True holographic appearance with additive transparency
+  - **Color Modulation**: State-based color shifts (cyan for active, muted for idle, red for error)
+  - **Holographic Flicker**: Subtle procedural noise for authentic holographic feel
+  - **Rim Glow**: Additional edge highlighting for sci-fi aesthetic
+- **Orbital Rings**: Decorative holographic rings orbiting the head for sci-fi feel
+- **Eye Inner Glow**: Bright white cores in eyes for enhanced visibility
+- **Separate Material Intensities**: Eyes (1.6x) and mouth (1.4x) are brighter than head for feature visibility
+
+**Post-Processing Effects:**
+- **Bloom Effect**: Real-time bloom via `@react-three/postprocessing` for authentic glow
+- **ACES Filmic Tone Mapping**: Cinema-quality color grading
+- **Dynamic Bloom Intensity**: State-driven bloom levels (0.4-0.7 based on activity)
+
+**State-Driven Behaviors:**
+- **IDLE**: Subtle breathing animation, low-intensity glow (0.6), slow scanlines, bloom at 0.4
+- **LISTENING**: Pulsing effect with increased glow (0.9) and faster scanlines, bloom at 0.6
+- **THINKING**: Gentle rotation animation, blue-cyan color shift, active scanlines, bloom at 0.55
+- **SPEAKING**: Synchronized mouth movement with speech levels, bright cyan glow (1.0), fast scanlines, bloom at 0.7
+- **TOOL_RUNNING**: Active processing animation with steady pulsing, bloom at 0.6
+- **ERROR**: Red tint with rapid pulsing and fast scanlines, bloom at 0.65
+
+**Technical Implementation:**
+- Built with `@react-three/fiber`, `@react-three/drei`, and `@react-three/postprocessing`
+- **drei Helpers**: Uses `Center` for auto-centering, `Float` for smooth floating animation
+- **Responsive Sizing**: Viewport-aware container using `max-w-[min(320px,45vh)] aspect-square`
+- Custom shader materials using Three.js ShaderMaterial with additive blending
+- **Separate Materials**: Different intensity multipliers for head, eyes, and mouth
+- Real-time uniform updates via `useFrame` hook
+- Performance optimized for 60fps rendering with efficient material updates
+- Responsive to speech telemetry for lip-sync style animations
+- Natural eye blinking with randomized intervals
+- Smooth state transitions with configurable animation parameters
+- **Geometry Positioning**: Eyes and mouth properly positioned to protrude from head sphere (z=1.02-1.12)
+- **Four-point Lighting**: Ambient + 3 point lights + rim light for optimal holographic illumination
 
 ### Projector Mode
 - **Display Optimization**: Special display mode optimized for projector presentations
@@ -722,20 +687,6 @@ All runtime data is stored in the `./data/` directory:
 
 **Note**: The `data/` directory is created automatically on first use. Ensure write permissions are available.
 
-### Documentation
-
-- `docs/VRM_STRUCTURE.md` - Complete VRM avatar structure documentation (verified from actual VRM file)
-  - Humanoid bone hierarchy with positions and rotations
-  - Blend shapes and expressions
-  - Scene graph structure
-  - Rotation limits and constraints
-  - AI control interface details
-
-- `docs/VRM_INTEGRATION.md` - VRM integration guide
-  - Architecture and command flow
-  - Available tools and usage examples
-  - Frontend integration details
-  - Testing instructions
 
 ## UX Parity Checklist
 
@@ -760,11 +711,11 @@ This checklist ensures the HUD matches the reference screenshot exactly:
   - [x] System Uptime (running time, session count, commands, load)
 
 ### Center Stage
-- [x] Concentric rings SVG (animated based on Zip state)
-- [x] Center label "J.A.R.V.I.S" (uppercase, tracking 0.22em)
+- [x] HoloFace 3D display (procedural holographic face with shader effects)
+- [x] Center label "ZIP" (uppercase, tracking 0.22em)
 - [x] Status text (e.g., "Listening for wake word…")
 - [x] Control dock: 3 square buttons (camera, mic, keyboard)
-- [x] Animations: Different animation per Zip state
+- [x] State-driven animations: HoloFace responds to Zip states with visual feedback
 
 ### Right Rail
 - [x] Fixed width: 344px
@@ -795,7 +746,7 @@ This checklist ensures the HUD matches the reference screenshot exactly:
 - [x] Extract Conversation downloads JSON + TXT
 - [x] Mic button toggles Realtime (if configured)
 - [x] Camera button toggles camera state
-- [x] Concentric rings animate per Zip state
+- [x] HoloFace animates per Zip state with shader effects
 - [x] Settings dropdown with theme toggle and projector mode toggle
 - [x] Projector mode adjusts layout for large displays
 
@@ -1012,6 +963,7 @@ ZIP uses **Open-Meteo** for weather data - a free, open-source weather API with 
 - `POST /api/tools/docs/answer` - Answer question from documents
 - `POST /api/tools/[tool]` - Generic tool endpoint (uses tool registry)
 
+
 All endpoints support rate limiting and return JSON responses with proper error handling.
 
 ## Development
@@ -1036,14 +988,13 @@ zip/
 │   └── (hud)/             # HUD page
 ├── components/             # React components
 │   └── hud/               # HUD-specific components
-│       └── ZipFaceStage.tsx # VRM avatar component
+│       └── HoloFace.tsx   # 3D holographic face component
 ├── hooks/                 # React hooks
 │   ├── useChat.ts         # Chat hook
 │   ├── useRealtime.ts     # Realtime hook
 │   ├── usePanelUpdates.ts # Panel update hook
 │   ├── usePanelContext.ts # Panel context hook
-│   ├── useTTS.ts          # TTS fallback hook
-│   └── useVRMControl.ts   # VRM command polling hook
+│   └── useTTS.ts          # TTS fallback hook
 ├── lib/                   # Core libraries
 │   ├── events/            # Event bus system
 │   ├── memory/            # Memory management
@@ -1055,9 +1006,6 @@ zip/
 │   │   ├── stt.ts         # Speech-to-text (Whisper)
 │   │   ├── tts.ts         # Text-to-speech
 │   │   └── prompts.ts     # System prompts
-│   ├── vrm/               # VRM avatar control
-│   │   ├── vrm-knowledge.ts # VRM bone/expression knowledge base
-│   │   └── command-queue.ts # Command queue management
 │   ├── orchestrators/     # AI Brain orchestration system
 │   │   ├── brain.ts       # Main orchestration graph
 │   │   ├── nodes/         # Orchestration nodes (tool-calling, research-graph, workflow-graph)
@@ -1071,7 +1019,6 @@ zip/
 │   │   ├── registry.ts    # Tool registry
 │   │   ├── executor.ts    # Tool executor
 │   │   └── implementations/ # Tool implementations
-│   │       └── vrm-control.ts # VRM control tools
 │   ├── middleware/        # Rate limiting
 │   ├── integrations/      # MCP router interface
 │   ├── voice/            # Voice system
@@ -1111,6 +1058,50 @@ zip/
 9. **MCP Integration Ready**: Stub interface for future Model Context Protocol integrations
 10. **Context Filtering**: Semantic similarity-based conversation history filtering to reduce token usage and improve relevance
 11. **Projector Mode**: Display mode optimized for projector presentations with larger text and adjusted layouts
+12. **Modern 3D Graphics**: HoloFace uses procedural geometry, custom shaders, and post-processing effects following React Three Fiber best practices
+
+### Technology Stack
+
+**Frontend:**
+- Next.js 14 (App Router)
+- React 18 with TypeScript
+- Tailwind CSS for styling
+- Three.js + React Three Fiber + drei + postprocessing for 3D graphics
+- Framer Motion for UI animations
+
+**Backend:**
+- Next.js API Routes
+- OpenAI API (Realtime, Responses, Vision, TTS, STT, Embeddings)
+- SQLite (better-sqlite3) for data persistence
+- Zod for schema validation
+
+**AI & Orchestration:**
+- Custom node-based orchestration system (LangGraph-inspired)
+- Semantic similarity for context filtering
+- Vector embeddings for document search
+
+**Development:**
+- Docker & Docker Compose for containerization
+- Playwright for E2E testing
+- ESLint + TypeScript for code quality
+
+## Current Status
+
+**✅ Production Ready**: ZIP is fully functional and production-ready with:
+- Complete voice and text interaction support
+- Comprehensive tool ecosystem (20+ tools)
+- Advanced AI orchestration with intelligent routing
+- Modern 3D holographic display (HoloFace)
+- Full observability and security features
+- Docker deployment support
+
+**🔄 Active Development**: The project is actively maintained with:
+- Regular updates to AI capabilities
+- Performance optimizations
+- Security enhancements
+- Feature additions based on user feedback
+
+**📦 Dependencies**: All major dependencies are up-to-date and actively maintained. The project uses modern, well-supported packages from the React and Three.js ecosystems.
 
 ## License
 

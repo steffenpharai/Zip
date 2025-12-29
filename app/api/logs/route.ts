@@ -16,9 +16,9 @@ export async function POST(request: NextRequest) {
     const lastLogTime = logCache.get(cacheKey) || 0;
     
     // Throttle: only log if enough time has passed since last identical log
-    // But allow VRM structure logs through (they're important and unique)
-    const isVRMLog = message.includes('VRM') || message.includes('bone') || message.includes('Blend');
-    if (!isVRMLog && now - lastLogTime < LOG_THROTTLE_MS) {
+    // Only errors and warnings bypass throttling
+    const isErrorOrWarn = level === "error" || level === "warn";
+    if (!isErrorOrWarn && now - lastLogTime < LOG_THROTTLE_MS) {
       return NextResponse.json({ success: true, throttled: true });
     }
     

@@ -42,21 +42,21 @@ export default function RightChat() {
       className="bg-panel-surface border-l border-border flex flex-col h-full"
       style={{ width: `${railWidth}px` }}
     >
-      <div className="p-4 border-b border-border flex items-center justify-between">
-        <h3 className="text-text-primary text-sm font-semibold uppercase tracking-wide">
+      <div className="p-2 sm:p-3 md:p-4 border-b border-border flex items-center justify-between gap-2 sm:gap-3 md:gap-4 min-w-0">
+        <h3 className="text-text-primary text-[10px] sm:text-xs md:text-sm font-semibold uppercase tracking-wide whitespace-nowrap flex-shrink-0">
           Conversation
         </h3>
-        <div className="flex gap-2">
+        <div className="flex gap-1 sm:gap-2 min-w-0 flex-shrink">
           <button
             onClick={handleClear}
-            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary border border-border rounded-md bg-panel-surface-2 hover:bg-panel-surface transition-colors"
+            className="px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs text-text-muted hover:text-text-primary border border-border rounded-md bg-panel-surface-2 hover:bg-panel-surface transition-colors whitespace-nowrap flex-shrink-0"
             aria-label="Clear conversation"
           >
             Clear
           </button>
           <button
             onClick={handleExtract}
-            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary border border-border rounded-md bg-panel-surface-2 hover:bg-panel-surface transition-colors"
+            className="px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs text-text-muted hover:text-text-primary border border-border rounded-md bg-panel-surface-2 hover:bg-panel-surface transition-colors whitespace-nowrap flex-shrink-0"
             aria-label="Extract conversation"
           >
             Extract Conversation

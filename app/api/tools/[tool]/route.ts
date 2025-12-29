@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { tool: string } }
+  { params }: { params: Promise<{ tool: string }> }
 ) {
   // Generate telemetry context for proper tracing
   const requestId = generateRequestId();
@@ -27,7 +27,9 @@ export async function POST(
     } catch (e) {
       // Empty body is fine, use empty object
     }
-    const toolName = params.tool;
+    // In Next.js 16, params is a Promise
+    const { tool } = await params;
+    const toolName = tool;
 
     // Execute tool with proper telemetry context
     const result = await executeTool(toolName, body, {

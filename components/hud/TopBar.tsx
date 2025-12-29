@@ -64,14 +64,11 @@ export default function TopBar() {
       className="w-full flex items-center justify-between px-4 border-b border-border"
       style={{ height: `${topBarHeight}px` }}
     >
-      {/* Left: ZIP title + Online pill */}
+      {/* Left: ZIP title */}
       <div className="flex items-center gap-3">
         <h1 className={`text-text-primary font-semibold tracking-zip uppercase ${isProjectorMode ? "text-xl" : "text-lg"}`}>
           ZIP
         </h1>
-        <div className="px-2 py-0.5 rounded-full bg-online-green/20 border border-online-green/40">
-          <span className={`text-online-green font-medium ${isProjectorMode ? "text-sm" : "text-xs"}`}>Online</span>
-        </div>
       </div>
 
       {/* Center: Time/Date chip */}
