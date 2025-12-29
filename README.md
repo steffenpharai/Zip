@@ -1103,6 +1103,53 @@ zip/
 
 **📦 Dependencies**: All major dependencies are up-to-date and actively maintained. The project uses modern, well-supported packages from the React and Three.js ecosystems.
 
+## Agent Integration
+
+ZIP is fully configured for AI agent collaboration with both GitHub Copilot and Cursor Agent.
+
+### For AI Agents
+
+- **[Agent Guide](AGENT_GUIDE.md)** - Quick reference for agents
+- **[Agent Onboarding](docs/agents/README.md)** - Getting started guide
+- **[Architecture Guide](docs/agents/architecture.md)** - System architecture
+- **[Development Workflow](docs/agents/development-workflow.md)** - How to work on tasks
+- **[GitHub Copilot Instructions](.github/copilot-instructions.md)** - Copilot-specific guide
+- **[Cursor Agent Instructions](.cursor/agent/instructions.md)** - Cursor-specific guide
+
+### Agent Capabilities
+
+Both GitHub Copilot and Cursor Agent can:
+
+- ✅ Work on GitHub issues automatically
+- ✅ Review and improve pull requests
+- ✅ Implement new features from descriptions
+- ✅ Fix bugs and errors
+- ✅ Follow project conventions and patterns
+- ✅ Run automated tests and checks
+
+### Issue Templates
+
+Use the issue templates in `.github/ISSUE_TEMPLATE/`:
+
+- **Feature Request** - For new features
+- **Bug Report** - For bug reports
+- **Enhancement** - For improving existing features
+- **Agent Task** - Specifically designed for agent assignment
+
+### Pull Request Process
+
+1. Create PR using the template
+2. Automated checks run (typecheck, lint, tests)
+3. Agent validation ensures code quality
+4. Review and merge
+
+### Agent Resources
+
+- **Context Files**: `.cursor/agent/` and `.github/copilot-instructions.md`
+- **Documentation**: `docs/agents/` directory
+- **Code Patterns**: `.cursorrules` file
+- **Examples**: `.cursor/agent/examples.md`
+
 ## License
 
 MIT
