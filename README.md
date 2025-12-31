@@ -442,6 +442,8 @@ Opens a URL in a new browser tab (requires user confirmation).
 
 ZIP includes full integration with 3D printers running Moonraker/Klipper firmware (e.g., Elegoo Neptune 4 Pro). Configure the printer IP address via the `PRINTER_API_URL` environment variable.
 
+**LangGraph Orchestration Integration**: All printer tools are fully integrated with the LangGraph orchestration system. Printer-related requests are automatically routed through the AI Brain orchestration graph, and the system prompts include comprehensive guidelines for using printer tools appropriately. The AI assistant is explicitly aware of all 11 printer tools (4 READ-tier status tools and 7 ACT-tier control tools) and will use them intelligently based on user requests.
+
 #### Printer Status Tools (READ tier)
 
 #### `get_printer_status` (READ)
@@ -636,6 +638,11 @@ Lists calendar events (integration not configured - returns placeholder message)
 - **Sub-Graphs**: Modular sub-graphs for specialized workflows:
   - **Research Graph**: Multi-step research pipeline with source validation (web_search → fetch_url → summarize_sources)
   - **Workflow Graph**: Mission planning and execution with progress tracking (planner → executor → narrator)
+- **Tool Integration**: All tools (including 3D printer tools) are automatically available through the orchestration system:
+  - **Tool Registry**: Centralized tool registry with permission tiers (READ/WRITE/ACT/ADMIN)
+  - **System Prompts**: Comprehensive tool usage guidelines in system prompts for intelligent tool selection
+  - **Direct Tool Calling**: Printer and other tools route through the "direct" execution path
+  - **Confirmation Handling**: ACT-tier tools (like printer control) automatically request user confirmation
 - **Context Filtering**: Intelligent conversation history filtering using semantic similarity to include only relevant messages, preventing token waste and improving response quality
 - **Observability**: Full request tracing with request IDs and step tracking
 - **Error Handling**: Graceful fallbacks when sub-graphs fail
@@ -1171,8 +1178,9 @@ zip/
 
 **✅ Production Ready**: ZIP is fully functional and production-ready with:
 - Complete voice and text interaction support
-- Comprehensive tool ecosystem (20+ tools)
-- Advanced AI orchestration with intelligent routing
+- Comprehensive tool ecosystem (20+ tools including 11 3D printer tools)
+- Advanced AI orchestration with intelligent routing (LangGraph v1 StateGraph)
+- Full 3D printer integration (Neptune 4 Pro / Moonraker/Klipper) with LangGraph orchestration
 - Full observability and security features
 - Docker deployment support
 
