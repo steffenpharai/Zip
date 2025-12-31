@@ -5,7 +5,7 @@ import { useProjector } from "@/lib/projector/projector-provider";
 import SystemStatsPanel from "./panels/SystemStatsPanel";
 import WeatherPanel from "./panels/WeatherPanel";
 import CameraPanel from "./panels/CameraPanel";
-import HoloFaceDiagnosticPanel from "./panels/HoloFaceDiagnosticPanel";
+import PrinterPanel from "./panels/PrinterPanel";
 
 export default function LeftRail() {
   const { isProjectorMode } = useProjector();
@@ -13,14 +13,16 @@ export default function LeftRail() {
 
   return (
     <div
-      className={`bg-panel-surface border-r border-border p-3 ${isProjectorMode ? "overflow-y-visible" : "overflow-y-auto"}`}
+      className={`bg-panel-surface border-r border-border p-3 flex flex-col ${isProjectorMode ? "overflow-y-visible" : "overflow-hidden"}`}
       style={{ width: `${railWidth}px` }}
     >
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 flex-shrink-0">
         <SystemStatsPanel />
         <WeatherPanel />
         <CameraPanel />
-        <HoloFaceDiagnosticPanel />
+      </div>
+      <div className="flex-1 min-h-0 mt-3">
+        <PrinterPanel />
       </div>
     </div>
   );
