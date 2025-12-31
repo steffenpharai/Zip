@@ -231,6 +231,6 @@ export function usePanelUpdates() {
       }
       clearInterval(interval);
     };
-  }, [emit, state.sessionStartTime, state.commandsCount, state.cameraEnabled, userLocation]);
+  }, [emit, state.sessionStartTime, state.commandsCount, state.cameraEnabled, userLocation, lastWeatherUpdate]);
 }
 

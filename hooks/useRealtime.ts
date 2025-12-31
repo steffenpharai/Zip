@@ -58,6 +58,95 @@ export function useRealtime() {
     }
   }, [setMode]);
 
+  // Fallback TTS
+  const speakWithFallback = useCallback(async (text: string) => {
+    try {
+      const response = await fetch("/api/voice/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!response.ok) {
+        throw new Error("TTS request failed");
+      }
+
+      const data = await response.json();
+      const audioData = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+
+      // Play audio
+      if (audioContextRef.current) {
+        const audioBuffer = await audioContextRef.current.decodeAudioData(audioData.buffer);
+        
+        // Generate message ID for this speech segment
+        const messageId = `tts-fallback-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+        const traceId = sessionIdRef.current || undefined;
+        currentSpeechMessageIdRef.current = messageId;
+
+        // Emit speech.start event
+        emit({
+          type: "speech.start",
+          source: "tts",
+          messageId,
+          traceId,
+          startedAt: Date.now(),
+        });
+
+        // Start audio telemetry
+        if (audioTelemetryCleanupRef.current) {
+          audioTelemetryCleanupRef.current();
+        }
+        
+        audioTelemetryCleanupRef.current = analyzeAudioBuffer(
+          audioBuffer,
+          audioContextRef.current,
+          {
+            onLevel: (level: number) => {
+              emit({
+                type: "speech.level",
+                level,
+                at: performance.now(),
+              });
+            },
+          }
+        );
+
+        // Create source for playback (separate from telemetry)
+        const source = audioContextRef.current.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContextRef.current.destination);
+        source.start(0);
+
+        setMode(ZIP_MODES.SPEAKING);
+        isSpeakingRef.current = true;
+
+        source.onended = () => {
+          // Cleanup telemetry
+          if (audioTelemetryCleanupRef.current) {
+            audioTelemetryCleanupRef.current();
+            audioTelemetryCleanupRef.current = null;
+          }
+
+          // Emit speech.end event
+          emit({
+            type: "speech.end",
+            source: "tts",
+            messageId,
+            traceId,
+            endedAt: Date.now(),
+          });
+
+          setMode(ZIP_MODES.IDLE);
+          isSpeakingRef.current = false;
+          currentSpeechMessageIdRef.current = null;
+        };
+      }
+    } catch (err) {
+      console.error("TTS fallback error:", err);
+      setMode(ZIP_MODES.ERROR);
+    }
+  }, [setMode, emit]);
+
   // Bridge integration: call orchestrator and handle response
   const callBridge = useCallback(async (userTranscript: string) => {
     if (!sessionIdRef.current) return;
@@ -207,96 +296,7 @@ export function useRealtime() {
       // Clear pending confirmation on error
       pendingConfirmationRef.current = null;
     }
-  }, [emit, setMode, setActiveTool, connected, useFallback]);
-
-  // Fallback TTS
-  const speakWithFallback = useCallback(async (text: string) => {
-    try {
-      const response = await fetch("/api/voice/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-
-      if (!response.ok) {
-        throw new Error("TTS request failed");
-      }
-
-      const data = await response.json();
-      const audioData = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
-
-      // Play audio
-      if (audioContextRef.current) {
-        const audioBuffer = await audioContextRef.current.decodeAudioData(audioData.buffer);
-        
-        // Generate message ID for this speech segment
-        const messageId = `tts-fallback-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-        const traceId = sessionIdRef.current || undefined;
-        currentSpeechMessageIdRef.current = messageId;
-
-        // Emit speech.start event
-        emit({
-          type: "speech.start",
-          source: "tts",
-          messageId,
-          traceId,
-          startedAt: Date.now(),
-        });
-
-        // Start audio telemetry
-        if (audioTelemetryCleanupRef.current) {
-          audioTelemetryCleanupRef.current();
-        }
-        
-        audioTelemetryCleanupRef.current = analyzeAudioBuffer(
-          audioBuffer,
-          audioContextRef.current,
-          {
-            onLevel: (level: number) => {
-              emit({
-                type: "speech.level",
-                level,
-                at: performance.now(),
-              });
-            },
-          }
-        );
-
-        // Create source for playback (separate from telemetry)
-        const source = audioContextRef.current.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContextRef.current.destination);
-        source.start(0);
-
-        setMode(ZIP_MODES.SPEAKING);
-        isSpeakingRef.current = true;
-
-        source.onended = () => {
-          // Cleanup telemetry
-          if (audioTelemetryCleanupRef.current) {
-            audioTelemetryCleanupRef.current();
-            audioTelemetryCleanupRef.current = null;
-          }
-
-          // Emit speech.end event
-          emit({
-            type: "speech.end",
-            source: "tts",
-            messageId,
-            traceId,
-            endedAt: Date.now(),
-          });
-
-          setMode(ZIP_MODES.IDLE);
-          isSpeakingRef.current = false;
-          currentSpeechMessageIdRef.current = null;
-        };
-      }
-    } catch (err) {
-      console.error("TTS fallback error:", err);
-      setMode(ZIP_MODES.ERROR);
-    }
-  }, [setMode, emit]);
+  }, [emit, setMode, setActiveTool, connected, useFallback, speakWithFallback]);
 
   // Fallback STT
   const transcribeWithFallback = useCallback(async (audioBlob: Blob): Promise<string> => {
@@ -370,7 +370,7 @@ export function useRealtime() {
         clearInterval(checkInterval);
       }
     };
-  }, [setMode]);
+  }, [setMode, emit]);
 
   const connect = useCallback(async () => {
     try {

@@ -1,0 +1,19 @@
+# Python virtual environment
+services/zip-avatar-server/venv/
+
+# Build outputs
+.next/
+out/
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Data directory
+data/
+
+# Logs
+*.log
+*.jsonl
+
