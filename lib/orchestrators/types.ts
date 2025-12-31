@@ -1,8 +1,8 @@
 /**
- * LangGraph orchestration state types
+ * LangGraph v1 orchestration state types
  * 
  * Defines the state structure for the AI Brain orchestration system
- * Compatible with LangGraph StateGraph state management
+ * Compatible with LangGraph v1 StateGraph state management (2026)
  */
 
 import type { UserContext } from "@/lib/context/types";
@@ -10,8 +10,9 @@ import type { UserContext } from "@/lib/context/types";
 export type RouteDecision = "direct" | "research" | "workflow" | "memory";
 
 /**
- * Orchestration state interface compatible with LangGraph StateGraph
+ * Orchestration state interface compatible with LangGraph v1 StateGraph
  * All fields are optional in the state schema to allow partial updates
+ * Matches the Annotation.Root schema defined in brain.ts
  */
 export interface OrchestrationState {
   // Input

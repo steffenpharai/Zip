@@ -4,11 +4,10 @@
  * Unified entry point for all conversation requests.
  * Routes to appropriate sub-graphs or direct tool calling based on request type.
  * 
- * Uses LangGraph StateGraph for stateful orchestration following 2025 best practices.
+ * Uses LangGraph v1 StateGraph for stateful orchestration following 2026 best practices.
  */
 
-import { StateGraph, Annotation, START, END } from "@langchain/langgraph";
-import type { CompiledStateGraph } from "@langchain/langgraph";
+import { StateGraph, Annotation } from "@langchain/langgraph";
 import type { RouteDecision } from "./types";
 import type { UserContext } from "@/lib/context/types";
 import { parseMemoryCommand, addPinnedMemory, deletePinnedMemory, getAllPinned, formatPinnedMemoryForPrompt } from "@/lib/memory/memory-manager";
@@ -20,8 +19,8 @@ import type { BrainActivityEvent } from "@/lib/events/types";
 import { ActivityTracker } from "./utils/activity-tracker";
 
 /**
- * Define the state schema using LangGraph Annotation pattern
- * This follows LangGraph 2025 best practices for state management
+ * Define the state schema using LangGraph v1 Annotation pattern
+ * This follows LangGraph 2026 best practices for state management
  */
 const OrchestrationStateAnnotation = Annotation.Root({
   // Input fields
@@ -490,8 +489,8 @@ let graph: any = null;
 
 /**
  * Build the orchestration graph
- * Creates the LangGraph StateGraph with all nodes and edges
- * Follows LangGraph 2025 best practices
+ * Creates the LangGraph v1 StateGraph with all nodes and edges
+ * Follows LangGraph 2026 best practices
  */
 function buildGraph() {
   if (graph) {

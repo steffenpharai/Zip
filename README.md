@@ -151,7 +151,7 @@ User Input → Event Bus → State Reducer → UI Updates
 6. **Panel Update Loop**: 2-second interval updating left rail panels
 7. **Memory System** (`lib/memory/`): SQLite-based pinned memory with text command parsing
 8. **Observability** (`lib/observability/`): Tracing and audit logging infrastructure
-9. **AI Brain Orchestration** (`lib/orchestrators/brain.ts`): Node-based unified orchestration system (LangGraph-inspired architecture) that routes all requests through intelligent decision nodes
+9. **AI Brain Orchestration** (`lib/orchestrators/brain.ts`): LangGraph v1 StateGraph-based unified orchestration system that routes all requests through intelligent decision nodes
 10. **Orchestrators** (`lib/orchestrators/`): Research and workflow sub-graphs integrated into the main orchestration system
 11. **Rate Limiting** (`lib/middleware/rate-limit.ts`): In-memory rate limiter for tool endpoints
 12. **Voice Persona** (`lib/voice/voicePersona.ts`): JARVIS-inspired voice persona configuration for Realtime and TTS
@@ -481,7 +481,7 @@ Lists calendar events (integration not configured - returns placeholder message)
 - **Push-to-Talk**: Mic button enables push-to-talk mode (tied to existing mic button, no UI changes)
 - **VAD Support**: Server-side Voice Activity Detection with turn detection
 - **Barge-in**: User can interrupt Zip while speaking - Zip immediately stops and listens
-- **Bridge to LangGraph**: All voice requests route through `/api/realtime/bridge` to LangGraph orchestration
+- **Bridge to LangGraph v1**: All voice requests route through `/api/realtime/bridge` to LangGraph v1 orchestration
 - **State Mapping**: Realtime states automatically map to Zip states (LISTENING/THINKING/SPEAKING/TOOL_RUNNING)
 - **Audio Management**: Prevents overlapping speech; manages audio playback with barge-in support
 - **JARVIS Voice Configuration**: Uses `gpt-4o-mini-tts-2025-12-15` model with cedar voice, British RP accent, 0.92 speed, and detailed instructions for calm, precise, controlled delivery
@@ -496,8 +496,10 @@ Lists calendar events (integration not configured - returns placeholder message)
 
 ### AI Brain Orchestration
 
-- **Node-Based Architecture**: Uses a LangGraph-inspired node-based orchestration system for stateful, graph-based request routing
-  - **Note**: LangGraph packages (`@langchain/langgraph`, `@langchain/core`, `langchain`) are installed but the current implementation uses a custom node-based system structured like LangGraph. The architecture is designed to be easily migrated to full LangGraph StateGraph if needed.
+- **Node-Based Architecture**: Uses LangGraph v1 StateGraph for stateful, graph-based request routing following 2026 best practices
+  - **LangGraph v1**: Full integration with `@langchain/langgraph` v1.0+ using StateGraph and Annotation patterns
+  - **State Management**: Uses LangGraph's Annotation.Root pattern for type-safe state management
+  - **Graph Execution**: Compiled StateGraph with conditional edges for intelligent routing
 - **Unified Entry Point**: All conversation requests route through `orchestrateConversation()` in `lib/orchestrators/brain.ts`
 - **Intelligent Routing**: Analyzes requests and routes to appropriate sub-graphs:
   - **Input Node**: Validates and prepares input, loads pinned memory
@@ -1053,7 +1055,7 @@ zip/
 4. **Event-Driven**: All state changes flow through typed event bus
 5. **Production-Grade**: Proper error handling, logging, tracing, rate limiting
 6. **Schema-First**: All tool calls use structured outputs with Zod schemas
-7. **Node-Based Orchestration**: Unified AI Brain orchestration system using a LangGraph-inspired node-based architecture for intelligent request routing and state management
+7. **Node-Based Orchestration**: Unified AI Brain orchestration system using LangGraph v1 StateGraph for intelligent request routing and state management (2026 best practices)
 8. **Voice Persona**: JARVIS-inspired voice persona with calm, precise, confident, and warm communication style
 9. **MCP Integration Ready**: Stub interface for future Model Context Protocol integrations
 10. **Context Filtering**: Semantic similarity-based conversation history filtering to reduce token usage and improve relevance
@@ -1076,7 +1078,7 @@ zip/
 - Zod for schema validation
 
 **AI & Orchestration:**
-- Custom node-based orchestration system (LangGraph-inspired)
+- LangGraph v1 StateGraph for stateful orchestration (2026 best practices)
 - Semantic similarity for context filtering
 - Vector embeddings for document search
 
@@ -1101,7 +1103,7 @@ zip/
 - Security enhancements
 - Feature additions based on user feedback
 
-**📦 Dependencies**: All major dependencies are up-to-date and actively maintained. The project uses modern, well-supported packages from the React and Three.js ecosystems.
+**📦 Dependencies**: All major dependencies are up-to-date and actively maintained. The project uses modern, well-supported packages including LangGraph v1, LangChain v1, and the latest OpenAI SDK (2026).
 
 ## Agent Integration
 

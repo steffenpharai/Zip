@@ -3,11 +3,8 @@
  * 
  * Handles research requests: web_search → fetch_url → summarize_sources
  * 
- * Uses LangGraph StateGraph for stateful orchestration following 2025 best practices.
+ * Uses LangGraph v1 patterns for stateful orchestration following 2026 best practices.
  */
-
-import { StateGraph, END } from "@langchain/langgraph";
-import type { CompiledStateGraph } from "@langchain/langgraph";
 import type { OrchestrationState } from "../types";
 import { webSearch } from "@/lib/tools/implementations/web-search";
 import { fetchUrl } from "@/lib/tools/implementations/web-fetch";
