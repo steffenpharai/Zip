@@ -7,7 +7,6 @@ A production-grade, state-of-the-art (2026) Jarvis-style HUD assistant built wit
 - **🎤 Realtime Voice Interface**: Low-latency voice interactions via OpenAI Realtime WebRTC with barge-in support
 - **🤖 AI Brain Orchestration**: Intelligent request routing with research and workflow sub-graphs
 - **💬 Multi-Modal Interaction**: Voice, text chat, and vision (webcam analysis) support
-- **🎭 HoloFace Display**: Advanced 3D holographic face with state-driven animations and shader effects
 - **🧠 Memory System**: User-controlled pinned memory with natural language commands
 - **📚 Document Intelligence**: PDF ingestion, vector search, and Q&A with citations
 - **🌐 Web Research**: Automated research pipeline with source validation and citations
@@ -156,8 +155,7 @@ User Input → Event Bus → State Reducer → UI Updates
 11. **Rate Limiting** (`lib/middleware/rate-limit.ts`): In-memory rate limiter for tool endpoints
 12. **Voice Persona** (`lib/voice/voicePersona.ts`): JARVIS-inspired voice persona configuration for Realtime and TTS
 13. **MCP Router Interface** (`lib/integrations/mcp-router.ts`): Stub interface for future Model Context Protocol integrations
-14. **HoloFace** (`components/hud/HoloFace.tsx`): Advanced 3D holographic-style face with state-driven animations and shader effects
-15. **Projector Mode** (`lib/projector/`): Display mode optimized for projector presentations with larger text and adjusted layouts
+14. **Projector Mode** (`lib/projector/`): Display mode optimized for projector presentations with larger text and adjusted layouts
 16. **Context Filtering** (`lib/orchestrators/utils/context-filter.ts`): Intelligent conversation history filtering using semantic similarity to include only relevant messages
 17. **Embeddings Utility** (`lib/utils/embeddings.ts`): Shared embedding utilities for semantic similarity operations across document search and context filtering
 
@@ -440,6 +438,133 @@ Opens a URL in a new browser tab (requires user confirmation).
 - `action`: "open"
 - `instruction`: Instruction message
 
+### 3D Printer Integration
+
+ZIP includes full integration with 3D printers running Moonraker/Klipper firmware (e.g., Elegoo Neptune 4 Pro). Configure the printer IP address via the `PRINTER_API_URL` environment variable.
+
+#### Printer Status Tools (READ tier)
+
+#### `get_printer_status` (READ)
+Returns comprehensive printer status including state, temperatures, position, and print progress.
+
+**Output:**
+- `state`: Printer state (e.g., "ready", "printing", "paused")
+- `klippyConnected`: Whether Klipper firmware is connected
+- `temperatures`: Hotend and bed temperatures (current and target)
+- `position`: Current X, Y, Z, E positions
+- `printProgress`: Current print job progress (filename, percentage, time remaining, state)
+
+#### `get_printer_temperature` (READ)
+Returns current hotend and bed temperatures.
+
+**Output:**
+- `hotend`: Current and target temperatures
+- `bed`: Current and target temperatures
+
+#### `get_print_progress` (READ)
+Returns current print job progress information.
+
+**Output:**
+- `filename`: Name of file being printed (optional)
+- `progress`: Print progress percentage (0-100, optional)
+- `printTime`: Time elapsed in seconds (optional)
+- `printTimeLeft`: Estimated time remaining in seconds (optional)
+- `state`: Print state (optional)
+
+#### `list_printer_files` (READ)
+Lists G-code files available on the printer.
+
+**Input:**
+- `root`: File root directory (default: "gcodes")
+
+**Output:**
+- `files`: Array of files with path, modified timestamp, and size
+- `root`: Root directory queried
+
+#### Printer Control Tools (ACT tier - require confirmation)
+
+#### `start_print` (ACT)
+Starts printing a G-code file. Requires user confirmation.
+
+**Input:**
+- `filename`: G-code filename (must exist on printer)
+
+**Output:**
+- `success`: Operation success status
+- `filename`: Filename that was started
+- `message`: Status message
+
+#### `pause_print` (ACT)
+Pauses the current print job. Requires user confirmation.
+
+**Output:**
+- `success`: Operation success status
+- `message`: Status message
+
+#### `resume_print` (ACT)
+Resumes a paused print job. Requires user confirmation.
+
+**Output:**
+- `success`: Operation success status
+- `message`: Status message
+
+#### `cancel_print` (ACT)
+Cancels the current print job. Requires user confirmation.
+
+**Output:**
+- `success`: Operation success status
+- `message`: Status message
+
+#### `set_temperature` (ACT)
+Sets target temperature for hotend or bed. Requires user confirmation.
+
+**Input:**
+- `heater`: "extruder" for hotend or "heater_bed" for bed
+- `target`: Target temperature in Celsius (0-300 for extruder, 0-120 for bed)
+
+**Output:**
+- `success`: Operation success status
+- `heater`: Heater that was set
+- `target`: Target temperature set
+- `message`: Status message
+
+#### `home_axes` (ACT)
+Homes specified axes on the printer. Requires user confirmation.
+
+**Input:**
+- `axes`: Array of axes to home ["X", "Y", "Z", "E"] (default: all axes)
+
+**Output:**
+- `success`: Operation success status
+- `axes`: Axes that were homed
+- `message`: Status message
+
+#### `move_axis` (ACT)
+Moves a specific axis (X, Y, Z, or E). Requires user confirmation.
+
+**Input:**
+- `axis`: Axis to move ("X", "Y", "Z", or "E")
+- `distance`: Distance to move in mm (positive or negative, max 300mm)
+- `speed`: Movement speed in mm/s (optional, default: 100, max: 1000)
+
+**Output:**
+- `success`: Operation success status
+- `axis`: Axis that was moved
+- `distance`: Distance moved
+- `message`: Status message
+
+#### `upload_gcode_file` (ACT)
+Uploads a G-code file to the printer. Requires user confirmation.
+
+**Input:**
+- `filename`: G-code filename (must end with .gcode or .g)
+- `content`: G-code file content (max 50MB)
+
+**Output:**
+- `success`: Operation success status
+- `filename`: Filename that was uploaded
+- `message`: Status message
+
 #### `calendar_create_event` (ACT)
 Creates a calendar event (integration not configured - returns placeholder message).
 
@@ -561,50 +686,6 @@ Lists calendar events (integration not configured - returns placeholder message)
 - **Search**: Full-text search across note titles and content
 - **Reminders**: Timers send reminders via chat when they fire
 
-### HoloFace
-
-ZIP features a world-class 3D holographic face display with advanced post-processing effects, following React Three Fiber and drei best practices.
-
-**Visual Design:**
-- **Procedural Geometry**: Sphere-based head with protruding geometric eyes and mouth (properly positioned for visibility)
-- **Holographic Shaders**: Custom GLSL shaders with:
-  - **Multi-frequency Scanlines**: Layered horizontal scanlines with varying speeds for depth
-  - **Enhanced Fresnel Glow**: Strong edge lighting effect that intensifies at viewing angles
-  - **Additive Blending**: True holographic appearance with additive transparency
-  - **Color Modulation**: State-based color shifts (cyan for active, muted for idle, red for error)
-  - **Holographic Flicker**: Subtle procedural noise for authentic holographic feel
-  - **Rim Glow**: Additional edge highlighting for sci-fi aesthetic
-- **Orbital Rings**: Decorative holographic rings orbiting the head for sci-fi feel
-- **Eye Inner Glow**: Bright white cores in eyes for enhanced visibility
-- **Separate Material Intensities**: Eyes (1.6x) and mouth (1.4x) are brighter than head for feature visibility
-
-**Post-Processing Effects:**
-- **Bloom Effect**: Real-time bloom via `@react-three/postprocessing` for authentic glow
-- **ACES Filmic Tone Mapping**: Cinema-quality color grading
-- **Dynamic Bloom Intensity**: State-driven bloom levels (0.4-0.7 based on activity)
-
-**State-Driven Behaviors:**
-- **IDLE**: Subtle breathing animation, low-intensity glow (0.6), slow scanlines, bloom at 0.4
-- **LISTENING**: Pulsing effect with increased glow (0.9) and faster scanlines, bloom at 0.6
-- **THINKING**: Gentle rotation animation, blue-cyan color shift, active scanlines, bloom at 0.55
-- **SPEAKING**: Synchronized mouth movement with speech levels, bright cyan glow (1.0), fast scanlines, bloom at 0.7
-- **TOOL_RUNNING**: Active processing animation with steady pulsing, bloom at 0.6
-- **ERROR**: Red tint with rapid pulsing and fast scanlines, bloom at 0.65
-
-**Technical Implementation:**
-- Built with `@react-three/fiber`, `@react-three/drei`, and `@react-three/postprocessing`
-- **drei Helpers**: Uses `Center` for auto-centering, `Float` for smooth floating animation
-- **Responsive Sizing**: Viewport-aware container using `max-w-[min(320px,45vh)] aspect-square`
-- Custom shader materials using Three.js ShaderMaterial with additive blending
-- **Separate Materials**: Different intensity multipliers for head, eyes, and mouth
-- Real-time uniform updates via `useFrame` hook
-- Performance optimized for 60fps rendering with efficient material updates
-- Responsive to speech telemetry for lip-sync style animations
-- Natural eye blinking with randomized intervals
-- Smooth state transitions with configurable animation parameters
-- **Geometry Positioning**: Eyes and mouth properly positioned to protrude from head sphere (z=1.02-1.12)
-- **Four-point Lighting**: Ambient + 3 point lights + rim light for optimal holographic illumination
-
 ### Projector Mode
 - **Display Optimization**: Special display mode optimized for projector presentations
 - **Larger Text**: Increased font sizes for better visibility at distance
@@ -713,11 +794,9 @@ This checklist ensures the HUD matches the reference screenshot exactly:
   - [x] System Uptime (running time, session count, commands, load)
 
 ### Center Stage
-- [x] HoloFace 3D display (procedural holographic face with shader effects)
 - [x] Center label "ZIP" (uppercase, tracking 0.22em)
 - [x] Status text (e.g., "Listening for wake word…")
 - [x] Control dock: 3 square buttons (camera, mic, keyboard)
-- [x] State-driven animations: HoloFace responds to Zip states with visual feedback
 
 ### Right Rail
 - [x] Fixed width: 344px
@@ -748,7 +827,6 @@ This checklist ensures the HUD matches the reference screenshot exactly:
 - [x] Extract Conversation downloads JSON + TXT
 - [x] Mic button toggles Realtime (if configured)
 - [x] Camera button toggles camera state
-- [x] HoloFace animates per Zip state with shader effects
 - [x] Settings dropdown with theme toggle and projector mode toggle
 - [x] Projector mode adjusts layout for large displays
 
@@ -857,6 +935,7 @@ Tests 20 scripted prompts to ensure:
 | `ZIP_REALTIME_ENABLED` | Enable Realtime WebRTC | `true` |
 | `ZIP_VOICE_FALLBACK_ENABLED` | Enable STT/TTS fallback | `true` |
 | `ZIP_UPDATE_INTERVAL_MS` | Panel update interval | `2000` |
+| `PRINTER_API_URL` | 3D printer API base URL (Moonraker/Klipper) | `http://169.254.178.90` |
 
 ### Required Configuration
 
@@ -882,6 +961,9 @@ ZIP uses **Open-Meteo** for weather data - a free, open-source weather API with 
 - **OPENAI_EMBEDDING_MODEL**: Override default embedding model (default: `text-embedding-3-small`, alternatives: `text-embedding-3-large`, `text-embedding-ada-002`)
   - Note: The `instructions` field is only supported by `gpt-4o-mini-tts` models
   - Available voices for `gpt-4o-mini-tts`: `cedar`, `marin`, `onyx` (recommended: `cedar` for JARVIS voice)
+- **PRINTER_API_URL**: 3D printer API base URL for Moonraker/Klipper integration (default: `http://169.254.178.90`)
+  - Must be a local network address (localhost, 169.254.x.x, or private IP ranges)
+  - Example: `PRINTER_API_URL=http://192.168.1.100`
 
 ## Security
 
@@ -990,7 +1072,6 @@ zip/
 │   └── (hud)/             # HUD page
 ├── components/             # React components
 │   └── hud/               # HUD-specific components
-│       └── HoloFace.tsx   # 3D holographic face component
 ├── hooks/                 # React hooks
 │   ├── useChat.ts         # Chat hook
 │   ├── useRealtime.ts     # Realtime hook
@@ -1060,7 +1141,6 @@ zip/
 9. **MCP Integration Ready**: Stub interface for future Model Context Protocol integrations
 10. **Context Filtering**: Semantic similarity-based conversation history filtering to reduce token usage and improve relevance
 11. **Projector Mode**: Display mode optimized for projector presentations with larger text and adjusted layouts
-12. **Modern 3D Graphics**: HoloFace uses procedural geometry, custom shaders, and post-processing effects following React Three Fiber best practices
 
 ### Technology Stack
 
@@ -1093,7 +1173,6 @@ zip/
 - Complete voice and text interaction support
 - Comprehensive tool ecosystem (20+ tools)
 - Advanced AI orchestration with intelligent routing
-- Modern 3D holographic display (HoloFace)
 - Full observability and security features
 - Docker deployment support
 

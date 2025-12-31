@@ -50,8 +50,8 @@ export function usePanelUpdates() {
         },
         {
           enableHighAccuracy: false, // Changed to false for faster response
-          timeout: 15000, // Increased timeout to 15 seconds
-          maximumAge: 0, // Don't use cached location - always get fresh
+          timeout: 10000, // Reduced timeout to 10 seconds
+          maximumAge: 300000, // Use cached location up to 5 minutes old
         }
       );
     } else if (typeof navigator !== "undefined" && !navigator.geolocation) {
@@ -67,67 +67,130 @@ export function usePanelUpdates() {
       isUpdatingRef.current = true;
 
       try {
-        // Update System Stats
-        const systemResponse = await fetch("/api/tools/get_system_stats", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        if (systemResponse.ok) {
-          const { result } = await systemResponse.json();
-          emit({
-            type: "panel.update",
-            panel: "system",
-            payload: result,
-            ts: Date.now(),
-          });
-        }
-
-        // Update Weather with user's location if available
-        // Only update weather every 5 minutes to reduce API calls (weather doesn't change that quickly)
         const now = Date.now();
         const timeSinceLastWeatherUpdate = now - lastWeatherUpdate;
         const shouldUpdateWeather = timeSinceLastWeatherUpdate >= INTERVALS.WEATHER_UPDATE_MS || lastWeatherUpdate === 0;
 
-        if (shouldUpdateWeather && userLocation) {
-          const weatherBody = { lat: userLocation.lat, lon: userLocation.lon };
-          const weatherResponse = await fetch("/api/tools/get_weather", {
+        // Prepare all API calls in parallel
+        const promises: Promise<void>[] = [];
+
+        // System Stats - always fetch
+        promises.push(
+          fetch("/api/tools/get_system_stats", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(weatherBody),
-          });
-          if (weatherResponse.ok) {
-            const { result } = await weatherResponse.json();
-            emit({
-              type: "panel.update",
-              panel: "weather",
-              payload: result,
-              ts: Date.now(),
-            });
-            setLastWeatherUpdate(now);
-          }
+            body: JSON.stringify({}),
+          })
+            .then(async (response) => {
+              if (response.ok) {
+                const { result } = await response.json();
+                emit({
+                  type: "panel.update",
+                  panel: "system",
+                  payload: result,
+                  ts: Date.now(),
+                });
+              }
+            })
+            .catch((error) => {
+              console.error("System stats fetch error:", error);
+            })
+        );
+
+        // Weather - only if location available and should update
+        if (shouldUpdateWeather && userLocation) {
+          const weatherBody = { lat: userLocation.lat, lon: userLocation.lon };
+          promises.push(
+            fetch("/api/tools/get_weather", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(weatherBody),
+            })
+              .then(async (response) => {
+                if (response.ok) {
+                  const { result } = await response.json();
+                  emit({
+                    type: "panel.update",
+                    panel: "weather",
+                    payload: result,
+                    ts: Date.now(),
+                  });
+                  setLastWeatherUpdate(now);
+                }
+              })
+              .catch((error) => {
+                console.error("Weather fetch error:", error);
+              })
+          );
         }
 
-        // Update Uptime
-        const uptimeResponse = await fetch("/api/tools/get_uptime", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionStartTime: state.sessionStartTime,
-            commandsCount: state.commandsCount,
-          }),
-        });
-        if (uptimeResponse.ok) {
-          const { result } = await uptimeResponse.json();
-          emit({
-            type: "panel.update",
-            panel: "uptime",
-            payload: result,
-            ts: Date.now(),
-          });
-        }
+        // Uptime - always fetch
+        promises.push(
+          fetch("/api/tools/get_uptime", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionStartTime: state.sessionStartTime,
+              commandsCount: state.commandsCount,
+            }),
+          })
+            .then(async (response) => {
+              if (response.ok) {
+                const { result } = await response.json();
+                emit({
+                  type: "panel.update",
+                  panel: "uptime",
+                  payload: result,
+                  ts: Date.now(),
+                });
+              }
+            })
+            .catch((error) => {
+              console.error("Uptime fetch error:", error);
+            })
+        );
 
-        // Update Camera (from state)
+        // Printer Status - always fetch
+        promises.push(
+          fetch("/api/tools/get_printer_status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          })
+            .then(async (response) => {
+              if (response.ok) {
+                const { result } = await response.json();
+                emit({
+                  type: "panel.update",
+                  panel: "printer",
+                  payload: result,
+                  ts: Date.now(),
+                });
+              } else {
+                const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
+                emit({
+                  type: "panel.update",
+                  panel: "printer_error",
+                  payload: { message: errorData.error || "Printer unavailable" },
+                  ts: Date.now(),
+                });
+              }
+            })
+            .catch((error) => {
+              console.error("Printer status fetch error:", error);
+              emit({
+                type: "panel.update",
+                panel: "printer_error",
+                payload: { message: "Printer offline or unreachable" },
+                ts: Date.now(),
+              });
+            })
+        );
+
+        // Execute all API calls in parallel
+        await Promise.allSettled(promises);
+
+        // Update Camera (from state) - synchronous, no API call needed
         emit({
           type: "panel.update",
           panel: "camera",
@@ -141,7 +204,7 @@ export function usePanelUpdates() {
       }
     };
 
-    // Defer initial update to allow page to render first
+    // Defer initial update slightly to allow page to render first
     // Use requestIdleCallback if available, otherwise setTimeout
     let initialUpdateIdleCallback: number | null = null;
     let initialUpdateTimeout: NodeJS.Timeout | null = null;
@@ -149,11 +212,11 @@ export function usePanelUpdates() {
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
       initialUpdateIdleCallback = window.requestIdleCallback(
         () => updatePanels(),
-        { timeout: 1000 } // Start after 1s even if not idle
+        { timeout: 200 } // Start after 200ms even if not idle
       );
     } else {
-      // Fallback: delay by 750ms (middle of 500-1000ms range)
-      initialUpdateTimeout = setTimeout(updatePanels, 750);
+      // Fallback: delay by 150ms (reduced from 750ms for faster startup)
+      initialUpdateTimeout = setTimeout(updatePanels, 150);
     }
 
     // Set up interval for subsequent updates

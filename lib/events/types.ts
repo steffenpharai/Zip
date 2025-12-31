@@ -1,6 +1,6 @@
 import { ZIP_MODES, type ZipMode } from "@/lib/constants";
 
-export type PanelType = "system" | "weather" | "camera" | "uptime";
+export type PanelType = "system" | "weather" | "camera" | "uptime" | "printer" | "printer_error";
 
 // Tool card payload types
 export type VisionToolCardPayload = {

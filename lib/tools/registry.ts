@@ -15,6 +15,9 @@ import { calendarCreateEvent, calendarCreateEventSchema, calendarCreateEventOutp
 import { ingestDocument, ingestDocumentSchema, ingestDocumentOutputSchema } from "./implementations/docs/ingest";
 import { docSearch, docSearchSchema, docSearchOutputSchema } from "./implementations/docs/search";
 import { docAnswer, docAnswerSchema, docAnswerOutputSchema } from "./implementations/docs/answer";
+import { getPrinterStatus, getPrinterStatusSchema, getPrinterStatusOutputSchema, getPrinterTemperature, getPrinterTemperatureSchema, getPrinterTemperatureOutputSchema, getPrintProgress, getPrintProgressSchema, getPrintProgressOutputSchema, listPrinterFiles, listPrinterFilesSchema, listPrinterFilesOutputSchema } from "./implementations/printer/status";
+import { startPrint, startPrintSchema, startPrintOutputSchema, pausePrint, pausePrintSchema, pausePrintOutputSchema, resumePrint, resumePrintSchema, resumePrintOutputSchema, cancelPrint, cancelPrintSchema, cancelPrintOutputSchema, setTemperature, setTemperatureSchema, setTemperatureOutputSchema, homeAxes, homeAxesSchema, homeAxesOutputSchema, moveAxis, moveAxisSchema, moveAxisOutputSchema } from "./implementations/printer/control";
+import { uploadGcodeFile, uploadGcodeFileSchema, uploadGcodeFileOutputSchema } from "./implementations/printer/upload";
 
 // Use server version for API routes, client version for direct calls
 // Always use server version since tools are called from API routes
@@ -289,6 +292,116 @@ toolRegistry.set("doc_answer", {
   outputSchema: docAnswerOutputSchema,
   permissionTier: "READ",
   execute: (input: unknown) => docAnswer(input as z.infer<typeof docAnswerSchema>),
+});
+
+// 3D Printer Status Tools (READ tier)
+toolRegistry.set("get_printer_status", {
+  name: "get_printer_status",
+  description: "Get comprehensive 3D printer status including state, temperatures, position, and print progress",
+  inputSchema: getPrinterStatusSchema,
+  outputSchema: getPrinterStatusOutputSchema,
+  permissionTier: "READ",
+  execute: (input: unknown) => getPrinterStatus(input as z.infer<typeof getPrinterStatusSchema>),
+});
+
+toolRegistry.set("get_printer_temperature", {
+  name: "get_printer_temperature",
+  description: "Get current hotend and bed temperatures from the 3D printer",
+  inputSchema: getPrinterTemperatureSchema,
+  outputSchema: getPrinterTemperatureOutputSchema,
+  permissionTier: "READ",
+  execute: (input: unknown) => getPrinterTemperature(input as z.infer<typeof getPrinterTemperatureSchema>),
+});
+
+toolRegistry.set("get_print_progress", {
+  name: "get_print_progress",
+  description: "Get current print job progress including percentage, time remaining, and status",
+  inputSchema: getPrintProgressSchema,
+  outputSchema: getPrintProgressOutputSchema,
+  permissionTier: "READ",
+  execute: (input: unknown) => getPrintProgress(input as z.infer<typeof getPrintProgressSchema>),
+});
+
+toolRegistry.set("list_printer_files", {
+  name: "list_printer_files",
+  description: "List G-code files available on the 3D printer",
+  inputSchema: listPrinterFilesSchema,
+  outputSchema: listPrinterFilesOutputSchema,
+  permissionTier: "READ",
+  execute: (input: unknown) => listPrinterFiles(input as z.infer<typeof listPrinterFilesSchema>),
+});
+
+// 3D Printer Control Tools (ACT tier - require confirmation)
+toolRegistry.set("start_print", {
+  name: "start_print",
+  description: "Start printing a G-code file on the 3D printer (requires user confirmation)",
+  inputSchema: startPrintSchema,
+  outputSchema: startPrintOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => startPrint(input as z.infer<typeof startPrintSchema>),
+});
+
+toolRegistry.set("pause_print", {
+  name: "pause_print",
+  description: "Pause the current print job on the 3D printer (requires user confirmation)",
+  inputSchema: pausePrintSchema,
+  outputSchema: pausePrintOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => pausePrint(input as z.infer<typeof pausePrintSchema>),
+});
+
+toolRegistry.set("resume_print", {
+  name: "resume_print",
+  description: "Resume a paused print job on the 3D printer (requires user confirmation)",
+  inputSchema: resumePrintSchema,
+  outputSchema: resumePrintOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => resumePrint(input as z.infer<typeof resumePrintSchema>),
+});
+
+toolRegistry.set("cancel_print", {
+  name: "cancel_print",
+  description: "Cancel the current print job on the 3D printer (requires user confirmation)",
+  inputSchema: cancelPrintSchema,
+  outputSchema: cancelPrintOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => cancelPrint(input as z.infer<typeof cancelPrintSchema>),
+});
+
+toolRegistry.set("set_temperature", {
+  name: "set_temperature",
+  description: "Set target temperature for hotend or bed on the 3D printer (requires user confirmation)",
+  inputSchema: setTemperatureSchema,
+  outputSchema: setTemperatureOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => setTemperature(input as z.infer<typeof setTemperatureSchema>),
+});
+
+toolRegistry.set("home_axes", {
+  name: "home_axes",
+  description: "Home specified axes on the 3D printer (requires user confirmation)",
+  inputSchema: homeAxesSchema,
+  outputSchema: homeAxesOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => homeAxes(input as z.infer<typeof homeAxesSchema>),
+});
+
+toolRegistry.set("move_axis", {
+  name: "move_axis",
+  description: "Move a specific axis (X, Y, Z, or E) on the 3D printer (requires user confirmation)",
+  inputSchema: moveAxisSchema,
+  outputSchema: moveAxisOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => moveAxis(input as z.infer<typeof moveAxisSchema>),
+});
+
+toolRegistry.set("upload_gcode_file", {
+  name: "upload_gcode_file",
+  description: "Upload a G-code file to the 3D printer (requires user confirmation)",
+  inputSchema: uploadGcodeFileSchema,
+  outputSchema: uploadGcodeFileOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => uploadGcodeFile(input as z.infer<typeof uploadGcodeFileSchema>),
 });
 
 export function getTool(name: string): ToolDefinition | undefined {

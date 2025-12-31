@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useEventBus } from "@/lib/events/hooks";
 import type { ZipEvent } from "@/lib/events/types";
 import { LAYOUT } from "@/lib/constants";
+import { getSystemStats } from "@/lib/tools/implementations/system";
 
 interface SystemStats {
   cpuPercent: number;
@@ -42,6 +43,19 @@ export default function SystemStatsPanel() {
       }
     }
   });
+
+  // Immediate system stats fetch on mount (client-side, instant)
+  useEffect(() => {
+    const fetchImmediateStats = async () => {
+      try {
+        const immediateStats = await getSystemStats();
+        setStats(immediateStats);
+      } catch (error) {
+        console.error("Failed to fetch immediate system stats:", error);
+      }
+    };
+    fetchImmediateStats();
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {

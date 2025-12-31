@@ -1,14 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import dynamic from "next/dynamic";
 import { useHudStore } from "@/lib/state/hudStore";
 import { useProjector } from "@/lib/projector/projector-provider";
 import { useEventBus } from "@/lib/events/hooks";
 import type { ZipEvent, BrainActivityEvent } from "@/lib/events/types";
 import { formatActivityMessage } from "@/lib/orchestrators/utils/activity-formatter";
-
-const HoloFace = dynamic(() => import("./HoloFace"), { ssr: false });
 
 const STATUS_MESSAGES: Record<string, string> = {
   IDLE: "hello",
@@ -25,12 +22,6 @@ export default function CenterCore() {
   const { isProjectorMode } = useProjector();
   const [activity, setActivity] = useState<BrainActivityEvent["activity"][]>([]);
   const [hasHadActivity, setHasHadActivity] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
-
-  // Ensure HoloFace only renders on client side after mount
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
 
   useEventBus((event: ZipEvent) => {
     if (event.type === "brain.activity") {
@@ -66,7 +57,7 @@ export default function CenterCore() {
     <div className="h-full w-full flex flex-col items-center justify-center gap-4 relative overflow-hidden">
       <div className="flex flex-col items-center gap-3 w-full max-w-md px-4">
         <h2 className={`w-full text-text-primary font-semibold tracking-zip uppercase text-center ${isProjectorMode ? "text-[4.875rem]" : "text-[2.925rem]"}`}>ZIP</h2>
-        {isMounted ? <HoloFace mode={state.mode} /> : <div className="w-full max-w-[min(320px,45vh)] aspect-square" />}
+        <div className="w-full max-w-[min(320px,45vh)] aspect-square" />
         <p className={`w-full text-text-muted text-center ${isProjectorMode ? "text-sm" : "text-xs"}`}>{statusMessage}</p>
       </div>
       <footer className="absolute bottom-4 text-text-muted text-[10px] opacity-60 text-center">
