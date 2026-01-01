@@ -1,0 +1,43 @@
+# Development Dockerfile for Robot Bridge Service
+FROM node:20-alpine
+
+# Install build dependencies for native modules (serialport)
+# Also install development tools and utilities
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    git \
+    curl \
+    wget \
+    bash \
+    linux-headers \
+    udev
+
+# Set environment variables for development
+ENV NODE_ENV=development
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files first for better layer caching
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci && \
+    npm cache clean --force
+
+# Create logs directory
+RUN mkdir -p /app/logs && \
+    chmod 755 /app/logs
+
+# Expose ports
+EXPOSE 8765 8766
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8766/health || exit 1
+
+# Run development server with hot reloading
+CMD ["npm", "run", "dev"]
+
