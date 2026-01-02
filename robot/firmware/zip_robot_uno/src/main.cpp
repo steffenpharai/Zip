@@ -1,36 +1,37 @@
 /*
  * ZIP Robot Firmware - Main Entry Point
  * 
- * Elegoo Smart Robot Car V4.0
- * Arduino UNO Platform
+ * ELEGOO UNO R3 + SmartCar-Shield-v1.1 (TB6612FNG)
+ * Arduino UNO Platform (ATmega328P)
  * 
  * ═══════════════════════════════════════════════════════════════════
- * VERIFIED CONFIGURATION (January 2026)
+ * VERIFIED CONFIGURATION (January 2026) - v2.7.0
  * ═══════════════════════════════════════════════════════════════════
- * RAM:   83.9% (1719/2048 bytes) - SAFE
- * Flash: 71.1% (22934/32256 bytes)
- * Tests: 93/93 passing
+ * Hardware: ELEGOO UNO R3 Car V2.0 + SmartCar-Shield-v1.1 (TB6612FNG V1_20230201)
+ * 
+ * RAM:   ~57% (estimated ~1170/2048 bytes) - Good (servo works!)
+ * Flash: ~55% (estimated)
  * 
  * ENABLED SUBSYSTEMS:
- *   ✅ motorDriver      - TB6612 motor control
+ *   ✅ motorDriver      - TB6612FNG motor control (STBY on D3)
  *   ✅ batteryMonitor   - ADC battery voltage (10Hz read)
  *   ✅ servoPan         - Pan servo (Servo library)
  *   ✅ ultrasonic       - HC-SR04 distance (10Hz read)
  *   ✅ lineSensor       - 3x IR line detect (10Hz read)
  *   ✅ modeButton       - Digital input
+ *   ✅ imu              - MPU6050 gyro/accel (10Hz polling)
  *   ✅ motionController - Setpoint tracking
  *   ✅ macroEngine      - Motion macros
  *   ✅ safetyLayer      - Safety checks
  * 
  * DISABLED SUBSYSTEMS (RAM constraints):
  *   ❌ statusLED        - FastLED uses ~100 bytes RAM
- *   ❌ imu              - Wire library pushes to 88%+ RAM
  *   ❌ commandHandler   - Legacy ELEGOO runtime (removed)
  * 
  * SCHEDULER TASKS:
  *   task_control_loop  - 50 Hz (motion + macros)
- *   task_sensors_fast  - 50 Hz (IMU - currently empty)
- *   task_sensors_slow  - 10 Hz (ultrasonic, battery, line)
+ *   task_sensors_fast  - 50 Hz (reserved)
+ *   task_sensors_slow  - 10 Hz (ultrasonic, battery, line, IMU)
  *   task_protocol_rx   - 1 kHz (serial command parsing)
  * 
  * COMMANDS SUPPORTED:
@@ -38,7 +39,8 @@
  *   N=5     Servo control
  *   N=21    Ultrasonic read
  *   N=22    Line sensor read
- *   N=120   Diagnostics
+ *   N=23    Battery voltage
+ *   N=120   Diagnostics (includes IMU status, HW profile)
  *   N=200   Setpoint streaming (fire-and-forget)
  *   N=201   Stop (immediate)
  *   N=210   Macro start
@@ -50,7 +52,7 @@
 #include <Arduino.h>
 #include <avr/wdt.h>
 
-// Configuration
+// Configuration (includes board header)
 #include "config.h"
 #include "pins.h"
 
@@ -66,13 +68,6 @@
 
 // Core
 #include "core/scheduler.h"
-
-// Protocol (JSON only - binary protocol removed for RAM savings)
-// #include "protocol/protocol_decode.h"  // REMOVED - legacy binary protocol
-// #include "protocol/protocol_encode.h"  // REMOVED - legacy binary protocol
-
-// Behavior
-// #include "behavior/command_handler.h"  // REMOVED - uses ArduinoJson
 
 // Motion Control
 #include "motion_types.h"
@@ -96,9 +91,6 @@ StatusLED statusLED;
 ModeButton modeButton;
 
 Scheduler scheduler;
-// ProtocolDecoder protocolDecoder;  // REMOVED - legacy binary protocol
-// ProtocolEncoder protocolEncoder;  // REMOVED - legacy binary protocol
-// CommandHandler commandHandler;    // REMOVED - uses ArduinoJson
 
 // Motion Control instances
 MotionController motionController;
@@ -109,6 +101,7 @@ FrameParser jsonFrameParser;
 // Forward declarations
 void handleMotionCommand(const ParsedCommand& cmd);
 void handleLegacyCommand(const ParsedCommand& cmd);
+void hardwareValidation();
 
 // Store direct motor values for continuous re-application in DIRECT mode
 static int16_t directLeftPWM = 0;
@@ -116,7 +109,13 @@ static int16_t directRightPWM = 0;
 
 // Motion ownership tracking for diagnostics (N=120)
 static uint8_t g_resetCounter = 0;
-static char g_lastOwner = 'I';  // I=Idle, D=Direct, X=Stopped
+static char g_lastOwner = 'I';  // I=Idle, D=Direct, M=Motion, X=Stopped
+
+// IMU initialization status
+static bool g_imuInitialized = false;
+
+// Boot-time battery voltage (mV)
+static uint16_t g_bootBatteryMv = 0;
 
 // Runtime free RAM measurement (AVR classic pattern)
 // Returns bytes between stack and heap - should never go below ~150 on UNO
@@ -139,43 +138,77 @@ void updateMinFreeRam() {
   }
 }
 
+// ============================================================================
+// Boot-time Hardware Validation (fast, non-blocking)
+// ============================================================================
+// Runs once in setup() after IMU init. Validates hardware and prints status.
+// Does NOT block on errors - just warns. Robot will still attempt to run.
+
+void hardwareValidation() {
+  // 1. Read battery voltage
+  batteryMonitor.update();
+  float voltage = batteryMonitor.readVoltage();
+  g_bootBatteryMv = (uint16_t)(voltage * 1000);
+  
+  // 2. Warn if battery voltage is out of expected range (6.0V - 8.5V)
+  bool batteryOk = (voltage >= 6.0f && voltage <= 8.5f);
+  
+  // 3. Attempt one ultrasonic read (timeout protected via HAL)
+  uint16_t usDist = ultrasonic.getDistance();
+  bool usOk = (usDist > 0 && usDist < 400);  // Plausible range check
+  
+  // 4. Print single boot status line (compact)
+  // Format: HW:<hash> imu=<0/1> batt=<mV> [warnings]
+  if (Serial.availableForWrite() >= 40) {
+    Serial.print(F("HW:"));
+    Serial.print(F(HARDWARE_PROFILE_HASH));
+    Serial.print(F(" imu="));
+    Serial.print(g_imuInitialized ? '1' : '0');
+    Serial.print(F(" batt="));
+    Serial.print(g_bootBatteryMv);
+    
+    // Print warnings if any
+    if (!batteryOk) {
+      Serial.print(F(" !batt"));
+    }
+    if (!usOk) {
+      Serial.print(F(" !us"));
+    }
+    
+    Serial.println();
+  }
+  
+  wdt_reset();
+}
+
 // Task: Control loop (50Hz)
 void task_control_loop() {
-  // DISABLED FOR TESTING - Disable all update loops to isolate motor functionality
-  // motorDriver.update();
-  // commandHandler.update();
-  
   // Only update motion controller for N=200 commands (but skip if DIRECT mode)
   if (motionController.getState() != MOTION_STATE_DIRECT) {
     motionController.update();
   }
   
-  // DISABLED: Control loop pin maintenance - testing if this blocks RX
-  // Motors should maintain state from initial N=999 pin writes
-  // The TB6612 maintains PWM until changed
-  
-  // RE-ENABLED: macroEngine.update() for macro support
+  // macroEngine.update() for macro support
   macroEngine.update();
 }
 
 // Task: Fast sensors (50Hz)
 void task_sensors_fast() {
-  // imu.update();  // DISABLED - Wire library causes RAM overflow
+  // Reserved for high-frequency sensor reads if needed
 }
 
-// Task: Slow sensors (10Hz) - RE-ENABLED
+// Task: Slow sensors (10Hz)
 void task_sensors_slow() {
   // Read sensors (results cached in drivers)
   ultrasonic.getDistance();
   batteryMonitor.update();
   lineSensor.readAll(nullptr, nullptr, nullptr);  // Cache line sensor values
+  
+  // Update IMU at 10Hz (non-blocking I2C read)
+  if (g_imuInitialized) {
+    imu.update();
+  }
 }
-
-// Task: Telemetry (REMOVED - legacy binary protocol)
-// void task_telemetry() {
-//   wdt_reset();
-//   commandHandler.sendTELEMETRY();
-// }
 
 // Task: Protocol RX (continuous, 1ms interval)
 // Single RX pipeline with deterministic parsing
@@ -220,12 +253,6 @@ void task_protocol_rx() {
         jsonFrameParser.reset();
         wdt_reset();
         
-        // Rate limiting disabled for minimal testing
-        // if (!safetyLayer.checkRateLimit()) {
-        //   continue;
-        // }
-        // safetyLayer.recordCommand();
-        
         // Route command based on N value
         if (cmd.N == 0) {
           // N=0: Hello handshake
@@ -239,21 +266,23 @@ void task_protocol_rx() {
           updateMinFreeRam();  // Probe after servo path
           JsonProtocol::sendOk(cmd.H);
         } else if (cmd.N == 120) {
-          // N=120: Diagnostics - compact debug state + RAM monitoring
-          // Format: {owner,lpwm,rpwm,stby,mstate,reset,freeRam,minRam}
+          // N=120: Diagnostics - compact debug state + HW + RAM + IMU
+          // Format: {owner,lpwm,rpwm,mstate,reset,hw:<hash>,imu:<0/1>,ram:<free>,min:<min>}
           updateMinFreeRam();  // Probe at diagnostics path
-          if (Serial.availableForWrite() >= 40) {
+          if (Serial.availableForWrite() >= 60) {
             Serial.print(F("{"));
             Serial.print(g_lastOwner);
             Serial.print(directLeftPWM);
             Serial.print(',');
             Serial.print(directRightPWM);
             Serial.print(',');
-            Serial.print(digitalRead(PIN_MOTOR_STBY));
-            Serial.print(',');
             Serial.print((uint8_t)motionController.getState());
             Serial.print(',');
             Serial.print(g_resetCounter);
+            Serial.print(F(",hw:"));
+            Serial.print(F(HARDWARE_PROFILE_HASH));
+            Serial.print(F(",imu:"));
+            Serial.print(g_imuInitialized ? 1 : 0);
             Serial.print(F(",ram:"));
             Serial.print(freeRam());
             Serial.print(F(",min:"));
@@ -374,15 +403,14 @@ void handleMotionCommand(const ParsedCommand& cmd) {
       // D2: w (yaw command -255..255)
       // T: TTL (150-300ms)
       
+      g_lastOwner = 'M';  // Track motion mode for diagnostics
+      
       // Cancel any active macro
       if (macroEngine.isActive()) {
         macroEngine.cancel();
       }
       
-      // SAFETY LAYER DISABLED FOR TESTING - Always enable motors
-      // if (!safetyLayer.shouldEnableMotors()) {
-      //   safetyLayer.enableMotors();
-      // }
+      // Enable motors (TB6612FNG requires STBY=HIGH)
       motorDriver.enable();
       
       // Apply setpoint
@@ -395,7 +423,7 @@ void handleMotionCommand(const ParsedCommand& cmd) {
     
     case 201: {
       // N=201: Stop Now (MUST RESPOND)
-      // ABSOLUTE STOP - highest priority, only place that stops motors
+      // ABSOLUTE STOP - highest priority, preempts everything
       
       g_lastOwner = 'X';  // Track stopped state for diagnostics
       
@@ -408,10 +436,10 @@ void handleMotionCommand(const ParsedCommand& cmd) {
       macroEngine.cancel();     // Sets active to false
       
       // SINGLE MOTOR WRITE POINT - only here we touch motor pins for stop
+      // TB6612FNG: Set PWM to 0 AND disable STBY
       analogWrite(PIN_MOTOR_PWMA, 0);
       analogWrite(PIN_MOTOR_PWMB, 0);
-      digitalWrite(PIN_MOTOR_STBY, LOW);
-      
+      digitalWrite(PIN_MOTOR_STBY, LOW);  // Disable motor driver
       
       JsonProtocol::sendOk(cmd.H);
       wdt_reset();
@@ -430,43 +458,42 @@ void handleMotionCommand(const ParsedCommand& cmd) {
       motionController.setDirectMode();
       macroEngine.cancel();  // Safe: no longer touches motor pins
       
-      // CRITICAL: Direct pin manipulation to ensure motors run
-      // Enable STBY FIRST
-      digitalWrite(PIN_MOTOR_STBY, HIGH);
-      
-      // Apply PWM directly to pins (bypassing all abstraction layers)
+      // Apply PWM directly to pins using TB6612FNG direction logic
       int16_t left = constrain(cmd.D1, -255, 255);
       int16_t right = constrain(cmd.D2, -255, 255);
       
-      // Right motor (Motor A: PWMA=5, AIN1=7)
+      // CRITICAL: Enable motor driver (TB6612FNG requires STBY=HIGH)
+      digitalWrite(PIN_MOTOR_STBY, HIGH);
+      
+      // TB6612FNG Direction Logic (from official ELEGOO code V1_20230201):
+      // Motor A (Right): Forward = AIN_1 HIGH, Reverse = AIN_1 LOW
+      // Motor B (Left):  Forward = BIN_1 HIGH, Reverse = BIN_1 LOW
+      
+      // Right motor (Motor A: PWMA=5, AIN_1=7)
       if (right > 0) {
-        digitalWrite(PIN_MOTOR_AIN1, HIGH);
-        analogWrite(PIN_MOTOR_PWMA, abs(right));
+        digitalWrite(PIN_MOTOR_AIN_1, HIGH);  // Forward (TB6612: HIGH)
+        analogWrite(PIN_MOTOR_PWMA, right);
       } else if (right < 0) {
-        digitalWrite(PIN_MOTOR_AIN1, LOW);
-        analogWrite(PIN_MOTOR_PWMA, abs(right));
+        digitalWrite(PIN_MOTOR_AIN_1, LOW);   // Reverse (TB6612: LOW)
+        analogWrite(PIN_MOTOR_PWMA, -right);
       } else {
         analogWrite(PIN_MOTOR_PWMA, 0);
       }
       
-      // Left motor (Motor B: PWMB=6, BIN1=8)
+      // Left motor (Motor B: PWMB=6, BIN_1=8)
       if (left > 0) {
-        digitalWrite(PIN_MOTOR_BIN1, HIGH);
-        analogWrite(PIN_MOTOR_PWMB, abs(left));
+        digitalWrite(PIN_MOTOR_BIN_1, HIGH);  // Forward (TB6612: HIGH)
+        analogWrite(PIN_MOTOR_PWMB, left);
       } else if (left < 0) {
-        digitalWrite(PIN_MOTOR_BIN1, LOW);
-        analogWrite(PIN_MOTOR_PWMB, abs(left));
+        digitalWrite(PIN_MOTOR_BIN_1, LOW);   // Reverse (TB6612: LOW)
+        analogWrite(PIN_MOTOR_PWMB, -left);
       } else {
         analogWrite(PIN_MOTOR_PWMB, 0);
       }
       
-      // Store values for continuous re-application
+      // Store values for diagnostics
       directLeftPWM = left;
       directRightPWM = right;
-      
-      // NOTE: Don't call motorDriver.setMotors() - already did direct pin writes
-      // This avoids double-writes and potential race conditions
-      
       
       JsonProtocol::sendOk(cmd.H);
       wdt_reset();
@@ -485,10 +512,7 @@ void handleMotionCommand(const ParsedCommand& cmd) {
       // Stop any active setpoint
       motionController.stop();
       
-      // SAFETY LAYER DISABLED FOR TESTING - Always enable motors
-      // if (!safetyLayer.shouldEnableMotors()) {
-      //   safetyLayer.enableMotors();
-      // }
+      // Enable motors (TB6612FNG requires STBY=HIGH)
       motorDriver.enable();
       
       // Start macro
@@ -535,6 +559,18 @@ void setup() {
   lineSensor.init();
   modeButton.init();
   
+  // Initialize IMU (MPU6050 on I2C)
+  // This is non-blocking and will set g_imuInitialized based on success
+#if defined(IMU_ENABLED) && IMU_ENABLED
+  g_imuInitialized = imu.init();
+#else
+  g_imuInitialized = false;
+#endif
+  
+  // Run boot-time hardware validation (fast, non-blocking)
+  // Prints: HW:<hash> imu=<0/1> batt=<mV> [warnings]
+  hardwareValidation();
+  
   // Initialize motion control system
   motionController.init(&motorDriver);
   macroEngine.init(&motorDriver);
@@ -548,9 +584,6 @@ void setup() {
   scheduler.registerTask(task_sensors_fast, 1000 / TASK_SENSORS_FAST_HZ, "sens_f");
   scheduler.registerTask(task_sensors_slow, 1000 / TASK_SENSORS_SLOW_HZ, "sens_s");
   scheduler.registerTask(task_protocol_rx, 1, "rx");
-  
-  // Protocol decoder removed - JSON only
-  // protocolDecoder.reset();
   
   // Enable watchdog (8 seconds)
   wdt_enable(WDTO_8S);

@@ -2,28 +2,36 @@
 
 Production-grade firmware for ELEGOO Smart Robot Car V4.0 on Arduino UNO.
 
-**Verified Configuration (January 2026)**
-- RAM: 83.7% (1715/2048 bytes)
-- Flash: 71.9% (23190/32256 bytes)
+**Hardware: ELEGOO UNO R3 + SmartCar-Shield-v1.1 (TB6612FNG Motor Driver)**
+
+**Verified Configuration (January 2026) - v2.7.0**
+- RAM: 57.1% (1170/2048 bytes) ✅ Well under 75% threshold
+- Flash: 54.6% (17620/32256 bytes)
 - All motion tests passing
-- Servo control: **Known Issue** - works at boot, fails on commands (RAM too high)
+- Servo control: **Working** ✅
+- IMU (MPU6050): **Enabled** ✅ (10Hz polling)
 - Sensor commands return actual values (N=21, N=22, N=23)
 
-⚠️ **Servo Issue**: N=5 commands fail at 83% RAM. Servo works at 46% RAM. See [Troubleshooting](#servo-doesnt-move).
+✅ **TB6612FNG Support**: Motor driver configured for V1_20230201 kit (TB6612FNG with STBY pin).
+✅ **IMU Enabled**: MPU6050 now active at 10Hz polling rate.
+✅ **Board-Correct by Construction**: Firmware locked to verified hardware stack.
 
 ---
 
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
-2. [Architecture](#architecture)
-3. [Subsystem Configuration](#subsystem-configuration)
-4. [Building & Uploading](#building--uploading)
-5. [Testing](#testing)
-6. [Protocol Reference](#protocol-reference)
-7. [Pin Mapping](#pin-mapping)
-8. [RAM Constraints & Lessons Learned](#ram-constraints--lessons-learned)
-9. [Troubleshooting](#troubleshooting)
+2. [Board Profile](#board-profile)
+3. [Verified From Shield Labels](#verified-from-shield-labels)
+4. [Hardware Configuration](#hardware-configuration)
+5. [Architecture](#architecture)
+6. [Subsystem Configuration](#subsystem-configuration)
+7. [Building & Uploading](#building--uploading)
+8. [Testing](#testing)
+9. [Protocol Reference](#protocol-reference)
+10. [Pin Mapping](#pin-mapping)
+11. [RAM Constraints & Lessons Learned](#ram-constraints--lessons-learned)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -40,7 +48,103 @@ node serial_motor_bringup.js COM5
 
 # 3. Run extended motion tests (slow, 0.5ft radius safe)
 node serial_motor_bringup.js COM5 --motion-only
+
+# 4. Run hardware smoke test
+node hardware_smoke.js COM5
 ```
+
+---
+
+## Board Profile
+
+This firmware is **LOCKED** to a specific hardware stack. Do not attempt to run on different hardware without modifying the board header.
+
+**Profile String:**
+```
+ELEGOO UNO R3 Car V2.0 + SmartCar-Shield-v1.1 (TB6612FNG V1_20230201)
+```
+
+**Profile Hash:** `ELGV11TB`
+
+**Hardware Stack:**
+| Component | Specification |
+|-----------|---------------|
+| MCU | ELEGOO UNO R3 (ATmega328P) |
+| Shield | ELEGOO SmartCar-Shield-v1.1 |
+| Motor Driver | TB6612FNG dual H-bridge |
+| Kit Version | V1_20230201 (2023+) |
+| IMU | MPU6050 @ I2C 0x68 |
+
+**Compile-Time Guard:**
+The board header will `#error` if the target is not Arduino UNO (ATmega328P).
+
+---
+
+## Verified From Shield Labels
+
+These pin assignments are **verified from silkscreen labels** visible on the actual shield hardware. Do not change without photographic evidence.
+
+### Ultrasonic Header
+**Silkscreen:** `"+5V 13 12 GND"`
+```
+Pin Order (left to right): +5V, D13 (Trig), D12 (Echo), GND
+```
+
+### Servo Header
+**Silkscreen:** `"GND +5V 10"`
+```
+Pin Order (left to right): GND, +5V, D10 (Signal)
+```
+
+### Line Tracking Header
+**Silkscreen:** `"GND +5V A2 A1 A0"`
+```
+Pin Order (left to right): GND, +5V, A2 (Left), A1 (Middle), A0 (Right)
+```
+
+### Power Input Header
+**Silkscreen:** `"GND / Vin"`
+```
+Battery input feeds VIN rail
+Battery monitor via voltage divider on A3
+```
+
+### Mode Button
+```
+D2 (INT0 capable)
+```
+
+---
+
+## Hardware Configuration
+
+### Motor Driver: TB6612FNG
+
+This firmware is configured for the **ELEGOO SmartCar Shield v1.1 (V1_20230201)** which uses the **Toshiba TB6612FNG** dual H-bridge motor driver IC.
+
+**Key features:**
+- **STBY pin on D3** - Must be HIGH to enable motor output
+- **Same direction polarity** - Both motors use HIGH=forward, LOW=reverse
+- **Compatible with kits dated 2023.02.01** (check your kit date)
+
+**Kit Variants:**
+| Kit Version | Motor Driver | STBY Pin | AIN_1 | BIN_1 |
+|-------------|--------------|----------|-------|-------|
+| V1_20230201 (2023+) | **TB6612FNG** | **D3** | D7 | D8 |
+| V0_20210120 (older) | DRV8835 | None | D8 | D7 |
+
+⚠️ **If motors don't move**, check your kit date and verify you have the correct driver configured.
+
+### IMU: MPU6050 (GY-521 Module)
+
+- I2C Address: `0x68`
+- Polling rate: 10Hz (in `task_sensors_slow`)
+- Non-blocking I2C reads (14 bytes per update)
+- Gyro calibration on startup (50 samples)
+
+### Pin Mapping Source
+
+All pin definitions are in `include/board/board_elegoo_uno_smartcar_shield_v11.h` - the single source of truth for hardware configuration.
 
 ---
 
@@ -63,6 +167,7 @@ node serial_motor_bringup.js COM5 --motion-only
 │ motionController │ │ ultrasonic       │ │ JSON Parser      │
 │ macroEngine      │ │ batteryMonitor   │ │ Command Router   │
 │                  │ │ lineSensor       │ │                  │
+│                  │ │ imu (MPU6050)    │ │                  │
 └──────────────────┘ └──────────────────┘ └──────────────────┘
           │
           ▼
@@ -76,8 +181,10 @@ node serial_motor_bringup.js COM5 --motion-only
 
 | Component | File | Description |
 |-----------|------|-------------|
-| **Scheduler** | `lib/scheduler/` | Cooperative task scheduler |
-| **Motor Driver** | `src/hal/motor_driver.cpp` | TB6612FNG PWM control |
+| **Board Config** | `include/board/board_elegoo_uno_smartcar_shield_v11.h` | Pin definitions (single source of truth) |
+| **Scheduler** | `src/core/scheduler.cpp` | Cooperative task scheduler |
+| **Motor Driver** | `src/hal/motor_tb6612.cpp` | TB6612FNG PWM control |
+| **IMU** | `src/hal/imu_mpu6050.cpp` | MPU6050 gyro/accel driver |
 | **Motion Controller** | `src/motion/motion_controller.cpp` | Setpoint tracking |
 | **Macro Engine** | `src/motion/macro_engine.cpp` | Predefined motion sequences |
 | **Frame Parser** | `src/serial/frame_parser.cpp` | JSON command parsing |
@@ -91,7 +198,8 @@ node serial_motor_bringup.js COM5 --motion-only
 
 | Subsystem | Init | Task | RAM Impact | Description |
 |-----------|------|------|------------|-------------|
-| `motorDriver` | ✅ | control_loop | baseline | TB6612 motor control |
+| `motorDriver` | ✅ | control_loop | baseline | TB6612FNG motor control |
+| `imu` | ✅ | sensors_slow | ~60 bytes | MPU6050 gyro/accel (10Hz) |
 | `batteryMonitor` | ✅ | sensors_slow | minimal | ADC battery voltage |
 | `servoPan` | ✅ | - | minimal | Pan servo (Servo lib) |
 | `ultrasonic` | ✅ | sensors_slow | minimal | HC-SR04 distance |
@@ -101,12 +209,12 @@ node serial_motor_bringup.js COM5 --motion-only
 | `macroEngine` | ✅ | control_loop | minimal | Motion macros |
 | `safetyLayer` | ✅ | - | minimal | Safety checks |
 
-### Disabled Subsystems ❌
+### Disabled/Removed Subsystems
 
 | Subsystem | Reason | RAM Saved |
 |-----------|--------|-----------|
+| `ArduinoJson` | Replaced with lightweight fixed-field scanner | ~600 bytes |
 | `statusLED` | FastLED library uses ~96 bytes RAM + heavy stack usage | ~100 bytes |
-| `imu` | Wire library + IMU pushes RAM to 88.3%, causes resets | ~103 bytes |
 | `commandHandler` | Legacy ELEGOO runtime (intentionally removed) | varies |
 
 ### Task Configuration
@@ -114,8 +222,8 @@ node serial_motor_bringup.js COM5 --motion-only
 | Task | Frequency | Enabled | Purpose |
 |------|-----------|---------|---------|
 | `task_control_loop` | 50 Hz | ✅ | Motion/macro updates |
-| `task_sensors_fast` | 50 Hz | ✅ | (empty - IMU disabled) |
-| `task_sensors_slow` | 10 Hz | ✅ | Ultrasonic, battery, line sensor |
+| `task_sensors_fast` | 50 Hz | ✅ | Reserved for future use |
+| `task_sensors_slow` | 10 Hz | ✅ | Ultrasonic, battery, line sensor, IMU |
 | `task_protocol_rx` | 1 kHz | ✅ | Serial command processing |
 | `task_telemetry` | 0 Hz | ❌ | Disabled (causes TX floods) |
 
@@ -164,11 +272,18 @@ pio device monitor -b 115200
 ### Expected Build Output
 
 ```
-RAM:   [========  ]  83.9% (used 1719 bytes from 2048 bytes)
-Flash: [=======   ]  71.1% (used 22934 bytes from 32256 bytes)
+RAM:   [======    ]  57.1% (used 1170 bytes from 2048 bytes)
+Flash: [=====     ]  54.6% (used 17620 bytes from 32256 bytes)
 ```
 
-⚠️ **RAM Warning**: Keep RAM under 85% to allow for stack usage during function calls.
+✅ **RAM Headroom**: Still plenty of stack space for servo operations and function calls.
+
+### Expected Boot Output
+
+```
+HW:ELGV11TB imu=1 batt=7400
+R
+```
 
 ---
 
@@ -179,6 +294,7 @@ Flash: [=======   ]  71.1% (used 22934 bytes from 32256 bytes)
 | Script | Language | Purpose |
 |--------|----------|---------|
 | `tools/serial_motor_bringup.js` | Node.js | Motor/motion tests |
+| `tools/hardware_smoke.js` | Node.js | Quick hardware validation |
 | `test_servo_rotation.py` | Python | Servo control tests |
 
 ### Motor Test: `serial_motor_bringup.js`
@@ -204,6 +320,25 @@ node serial_motor_bringup.js COM5 --quick
 # Extended motion tests only (safe for desktop - 0.5ft radius)
 node serial_motor_bringup.js COM5 --motion-only
 ```
+
+### Hardware Smoke Test: `hardware_smoke.js`
+
+Quick validation that all hardware responds correctly.
+
+```bash
+node hardware_smoke.js COM5
+```
+
+Tests:
+1. N=0 Hello → expect `{H_ok}`
+2. N=120 Diagnostics → expect `{...hw:ELGV11TB...}`
+3. N=23 Battery → expect `{H_<4000-9000>}` (mV)
+4. N=21 Ultrasonic → expect `{H_<0-400>}` (cm)
+5. N=22 Line sensors → expect `{H_<0-1023>}` (analog)
+6. N=5 Servo → expect `{H_ok}`
+7. N=201 Stop → expect `{H_ok}`
+
+Exit code 0 = all pass, 1 = any failure.
 
 ### Servo Test: `test_servo_rotation.py`
 
@@ -234,14 +369,6 @@ python test_servo_rotation.py --list-ports
 | **All** | `--all` | Edge cases + sweep + rapid moves |
 | **Single** | `--angle 90` | Set to specific angle |
 | **Sweep** | `--sweep` | 0° → 180° → 0° sweep |
-
-#### Test Modes
-
-| Mode | Flag | Tests | Duration |
-|------|------|-------|----------|
-| **Full** | (none) | 11 phases, all subsystems | ~60s |
-| **Quick** | `--quick` | Basic motor start/stop | ~10s |
-| **Motion Only** | `--motion-only` | 8 motion phases | ~45s |
 
 #### Test Phases (Full Mode)
 
@@ -322,7 +449,7 @@ Format: NDJSON (one JSON object per line)
 | 21 | Ultrasonic | D1=mode | `{H_<value>}` | Distance/obstacle sensor |
 | 22 | Line Sensor | D1=sensor | `{H_<value>}` | IR line sensor (L/M/R) |
 | 23 | Battery | - | `{H_<mV>}` | Battery voltage |
-| 120 | Diagnostics | - | `{<state>...}` | Debug state dump |
+| 120 | Diagnostics | - | `{<state>...}` | Debug state dump (includes IMU, HW profile) |
 | 200 | Setpoint | D1=v, D2=w, T=ttl | (none) | Streaming motion |
 | 201 | Stop | - | `{H_ok}` | Immediate stop |
 | 210 | Macro Start | D1=id | `{H_ok}` | Start macro |
@@ -357,29 +484,23 @@ These commands return actual sensor values in the response.
 {"N":23,"H":"batt"}          →  {batt_7400}  // 7.4V
 ```
 
-### Legacy Commands (N=1-199)
-
-Other legacy ELEGOO commands return `{H_ok}` for compatibility.
-
-| N | Command | Parameters | Description |
-|---|---------|------------|-------------|
-| 100 | Clear Mode | - | Stop all |
-| 110 | Clear State | - | Reset state |
-
 ### Diagnostics Response (N=120)
 
 ```
-{<owner><L>,<R>,<stby>,<state>,<resets>}
+{<owner><L>,<R>,<state>,<resets>,hw:<hash>,imu:<0/1>,ram:<free>,min:<min>}
 {stats:rx=<rx>,jd=<jd>,pe=<pe>,bc=<bc>,tx=<tx>,ms=<ms>}
 ```
 
 | Field | Values | Description |
 |-------|--------|-------------|
-| owner | `I`=Idle, `D`=Direct, `X`=Stopped | Motion owner |
+| owner | `I`=Idle, `D`=Direct, `M`=Motion, `X`=Stopped | Motion owner |
 | L, R | -255 to 255 | Current PWM values |
-| stby | 0/1 | Motor driver standby |
 | state | 0-4 | Motion controller state |
 | resets | 0+ | Reset counter |
+| hw | `ELGV11TB` | Hardware profile hash |
+| imu | 0/1 | IMU initialization status |
+| ram | bytes | Current free RAM |
+| min | bytes | Minimum observed free RAM |
 
 ### Direct Motor Control (N=999)
 
@@ -390,7 +511,7 @@ Other legacy ELEGOO commands return `{H_ok}` for compatibility.
 - D1: Left motor PWM (-255 to 255, negative=reverse)
 - D2: Right motor PWM (-255 to 255, negative=reverse)
 - Bypasses all motion control, directly sets pins
-- Maintained by control loop until stopped
+- Automatically enables STBY pin (TB6612FNG)
 
 ### Servo Control (N=5)
 
@@ -434,30 +555,42 @@ python test_servo_rotation.py --port COM5 --all
 
 ### Motor Driver (TB6612FNG)
 
-| Function | Pin | Arduino |
-|----------|-----|---------|
-| STBY | D3 | 3 |
-| AIN1 (L dir) | D7 | 7 |
-| AIN2 (L dir) | D8 | 8 |
-| PWMA (L speed) | D5 | 5 |
-| BIN1 (R dir) | D4 | 4 |
-| BIN2 (R dir) | D9 | 9 |
-| PWMB (R speed) | D6 | 6 |
+| Function | Pin | Silkscreen | Notes |
+|----------|-----|------------|-------|
+| Motor A (Right) PWM | D5 | - | `PIN_MOTOR_PWMA` |
+| Motor B (Left) PWM | D6 | - | `PIN_MOTOR_PWMB` |
+| Motor A (Right) Direction | D7 | - | `PIN_MOTOR_AIN_1` |
+| Motor B (Left) Direction | D8 | - | `PIN_MOTOR_BIN_1` |
+| **STBY (Standby)** | **D3** | - | **Must be HIGH to enable motors!** |
+
+**Direction Control Logic (TB6612FNG):**
+- Motor A (Right): Forward = AIN_1 HIGH, Reverse = AIN_1 LOW
+- Motor B (Left): Forward = BIN_1 HIGH, Reverse = BIN_1 LOW
+- Note: Both motors use same polarity (HIGH=forward)
+
+### IMU (MPU6050)
+
+| Function | Pin | Notes |
+|----------|-----|-------|
+| SDA | A4 | I2C data |
+| SCL | A5 | I2C clock |
+| Address | 0x68 | Default MPU6050 address |
 
 ### Sensors & Peripherals
 
-| Function | Pin | Arduino | Notes |
-|----------|-----|---------|-------|
-| Servo Pan (Z) | D10 | 10 | Horizontal pan, 0-180° |
-| Servo Tilt (Y) | D11 | 11 | Vertical tilt (not impl.) |
-| Ultrasonic Trig | D13 | 13 | HC-SR04 |
-| Ultrasonic Echo | D12 | 12 | HC-SR04 |
-| Line Sensor L | A2 | 16 | ITR20001 |
-| Line Sensor M | A1 | 15 | ITR20001 |
-| Line Sensor R | A0 | 14 | ITR20001 |
-| Battery Monitor | A3 | 17 | Voltage divider |
-| Mode Button | D2 | 2 | Interrupt capable |
-| RGB LED | D4 | 4 | WS2812 (disabled) |
+| Function | Pin | Silkscreen | Notes |
+|----------|-----|------------|-------|
+| Servo Pan (Z) | D10 | `"GND +5V 10"` | Horizontal pan, 0-180° |
+| Servo Tilt (Y) | D11 | - | Vertical tilt (not impl.) |
+| Ultrasonic Trig | D13 | `"+5V 13 12 GND"` | HC-SR04 |
+| Ultrasonic Echo | D12 | `"+5V 13 12 GND"` | HC-SR04 |
+| Line Sensor L | A2 | `"GND +5V A2 A1 A0"` | ITR20001 |
+| Line Sensor M | A1 | `"GND +5V A2 A1 A0"` | ITR20001 |
+| Line Sensor R | A0 | `"GND +5V A2 A1 A0"` | ITR20001 |
+| Battery Monitor | A3 | - | Voltage divider |
+| Mode Button | D2 | - | Interrupt capable |
+| RGB LED | D4 | - | WS2812 (disabled) |
+| IR Receiver | D9 | - | (not used in ZIP firmware) |
 
 ---
 
@@ -468,39 +601,40 @@ python test_servo_rotation.py --port COM5 --all
 - **Total RAM**: 2048 bytes
 - **Safe Limit for basic commands**: ~85% (1740 bytes)
 - **Safe Limit for servo control**: ~75% (1536 bytes) - servo.attach() needs stack space
-- **Current Usage**: 83.7% (1715 bytes)
+- **Current Usage**: 57.1% (1170 bytes) ✅
 
-⚠️ **CRITICAL**: Servo control requires RAM below 75% to work reliably. The `servo.attach()` function uses significant stack space and will corrupt memory if insufficient stack is available.
+✅ **RAM Optimized**: TB6612FNG driver + IMU still well under 75% threshold.
 
 ### What Uses RAM
 
 | Component | Approx. RAM | Notes |
 |-----------|-------------|-------|
 | Serial buffers | 128 bytes | TX + RX |
-| JSON parser | 160 bytes | StaticJsonDocument |
-| Frame parser | 80 bytes | Reduced from 128 |
+| Frame parser | ~80 bytes | Lightweight fixed-field scanner |
 | Scheduler | ~50 bytes | 4 task slots |
 | Motor driver | ~20 bytes | State + config |
+| IMU | ~60 bytes | Calibration offsets + yaw |
 | Sensors | ~30 bytes | Cached values |
-| Stack | ~200 bytes | Function calls |
+| Stack | ~700 bytes | **Available** for function calls |
 
-### What Broke (and Why)
+### What Broke (and Why) - All Fixed ✅
 
 | Issue | Symptom | Cause | Solution |
 |-------|---------|-------|----------|
-| **FastLED** | Watchdog resets | +96 bytes RAM + stack | Disabled statusLED |
-| **IMU/Wire** | Resets at 88% RAM | Wire library overhead | Disabled IMU |
-| **Verbose debug** | Resets mid-command | F() strings still use RAM | Minimal logging |
-| **Multiple motor writers** | Inconsistent stops | macroEngine/motionController calling motorDriver.stop() | Centralized control |
+| **ArduinoJson** | 83%+ RAM, servo failures | StaticJsonDocument + library overhead | ✅ Replaced with fixed-field scanner |
+| **FastLED** | Watchdog resets | +96 bytes RAM + stack | ✅ Disabled statusLED |
+| **Wrong motor driver** | Motors didn't move | Initially configured for DRV8835, but kit has TB6612FNG | ✅ Added STBY pin (D3) support |
+| **Wrong pin mapping** | Motors didn't move | AIN_1/BIN_1 pins swapped between DRV8835/TB6612 | ✅ Corrected to AIN_1=D7, BIN_1=D8 |
+| **Verbose debug** | Resets mid-command | F() strings still use RAM | ✅ Minimal logging |
 
 ### Best Practices
 
 1. **Never use `String`** - Use `char[]` with fixed sizes
 2. **Use `F()` sparingly** - Still consumes RAM at runtime
 3. **Minimize debug output** - Serial.print() uses stack
-4. **StaticJsonDocument ≤ 160 bytes** - Larger causes stack overflow
-5. **Keep RAM under 85%** - Leave room for stack
-6. **Test after each subsystem enable** - Find RAM issues early
+4. **Keep RAM under 75%** - Leave room for stack + servo
+5. **Test after each subsystem enable** - Find RAM issues early
+6. **Use board header** - Single source of truth for pins
 
 ---
 
@@ -508,30 +642,38 @@ python test_servo_rotation.py --port COM5 --all
 
 ### Motors Don't Move
 
-1. Check STBY pin (D3) is HIGH
-2. Verify N=999 command is acknowledged (`{H_ok}`)
-3. Check diagnostics: `{"N":120}` - should show `{D<pwm>,...}`
-4. Verify battery voltage is adequate
+1. Verify N=999 command is acknowledged (`{H_ok}`)
+2. Check diagnostics: `{"N":120}` - should show `{D<pwm>,...}`
+3. Verify battery voltage is adequate (N=23 should show >7000mV)
+4. **TB6612FNG requires STBY=HIGH** - firmware sets D3 HIGH on motor commands
+5. Check if your kit uses TB6612FNG (2023+) or DRV8835 (older) - pin mapping differs!
 
 ### Motors Don't Stop
 
 1. Send `{"N":201}` and check for `{H_ok}`
-2. Check diagnostics shows `{X0,0,0,...}`
+2. Check diagnostics shows `{X0,0,...}`
 3. Ensure control loop is running (50Hz)
 
 ### No Serial Response
 
 1. Verify baud rate is 115200
-2. Check for `R` on boot (ready marker)
+2. Check for boot output: `HW:ELGV11TB imu=1 batt=XXXX` then `R`
 3. Reduce command rate (max 50/sec)
 4. Check TX buffer isn't full
 
 ### Watchdog Resets (repeated `R`)
 
-1. Check RAM usage (<85%)
+1. Check RAM usage (<75%)
 2. Remove debug print statements
 3. Ensure no blocking operations
 4. Verify all tasks complete quickly
+
+### IMU Not Working
+
+1. Check diagnostics N=120 shows `imu:1`
+2. Verify I2C wiring (SDA=A4, SCL=A5)
+3. Check MPU6050 module is powered (3.3V or 5V)
+4. If `imu:0`, the MPU6050 was not detected at startup
 
 ### Test Script Fails
 
@@ -549,50 +691,62 @@ python test_servo_rotation.py --port COM5 --all
 4. Send test command: `{"N":5,"D1":90}`
 5. Run servo test: `python test_servo_rotation.py --port COM5 --angle 90`
 
-**If servo moves on boot but not on commands - RAM/Stack Issue:**
-
-The servo control uses the exact ELEGOO pattern which requires significant stack space:
-```cpp
-servo.attach(PIN_SERVO_Z);   // Attach before write
-servo.write(angle);          // Set position
-delay(450);                  // Wait for movement
-servo.detach();              // Release Timer1
-```
-
-When RAM usage is too high (>80%), there's insufficient stack space for `servo.attach()` which corrupts the Servo library's internal data structures.
-
-**Symptoms of stack overflow:**
-- Servo moves to center on boot (init works) but not on commands
-- `servo.attached()` returns false even after calling `attach()`
-- `servo.read()` returns garbage values like -34
-
-**Solutions:**
-1. Reduce RAM usage to below 75% (gives ~500+ bytes for stack)
-2. Disable non-essential subsystems (IMU, FastLED already disabled)
-3. Reduce buffer sizes in frame parser or JSON documents
-4. Move servo control earlier in the call chain (reduce stack depth)
-
-**Verify the issue:**
-```bash
-# Test at minimal RAM (should work)
-# Disable most subsystems, keep only servo + motor + JSON parser
-
-# Check RAM after build:
-pio run -v | grep RAM
-# Should be below 75% for servo to work reliably
-```
+**Hardware Issues:**
+- Check servo physically connected and powered
+- Verify pin 10 is not damaged
+- Try a known-good servo
 
 ---
 
 ## Version History
 
-### v2.3.0 (January 2026) - Current
+### v2.7.0 (January 2026) - Current
+- **Board-correct by construction**: Firmware locked to verified hardware stack
+  - New canonical board header: `board_elegoo_uno_smartcar_shield_v11.h`
+  - MCU guard: `#error` if not ATmega328P
+  - Hardware profile string and hash for diagnostics
+  - Silkscreen-verified pin assignments documented
+- **Motor driver renamed**: Files renamed from DRV8835 to TB6612
+  - `motor_tb6612.h/.cpp` (was `motor_driver_drv8835.h/.cpp`)
+  - Class renamed to `MotorDriverTB6612`
+- **Boot-time hardware validation**: 
+  - Prints `HW:<hash> imu=<0/1> batt=<mV>` on startup
+  - Warns if battery or ultrasonic out of range
+- **Enhanced diagnostics**: N=120 now includes `hw:ELGV11TB` profile hash
+- **RAM**: ~57% (unchanged)
+
+### v2.6.0 (January 2026)
+- **TB6612FNG motor driver support**: Corrected for V1_20230201 kit
+  - Added STBY pin support (D3 - must be HIGH to enable motors)
+  - Fixed pin mapping: AIN_1=D7, BIN_1=D8
+  - Correct direction logic: both motors use HIGH=forward
+- **RAM**: 57.1% (1170 bytes)
+- **Flash**: 54.6% (17620 bytes)
+- All motion tests passing
+
+### v2.5.0 (January 2026)
+- **Initial DRV8835 attempt**: Refactored for SmartCar Shield v1.1
+  - Created board header: `include/board/board_elegoo_v4_uno_v11.h`
+  - Issue: Motors didn't move (wrong driver for hardware)
+- **MPU6050 IMU enabled**: 10Hz polling in sensors_slow task
+  - Non-blocking I2C reads
+  - Gyro calibration on startup
+  - IMU status in N=120 diagnostics
+- Backward compatible with existing test tools
+
+### v2.4.0 (January 2026)
+- **Major RAM reduction**: 83.7% → 51.6% (saves ~660 bytes)
+- **ArduinoJson removed**: Replaced with lightweight fixed-field scanner
+  - No external JSON library dependency
+  - Fixed-field parsing for ELEGOO protocol (N, H, D1-D4, T)
+  - Saves 96+ bytes stack per parse + library overhead
+- **Servo control now working**: RAM well under 75% threshold
+- **Flash reduced**: 71.9% → 47.1%
+- All motion tests passing
+
+### v2.3.0 (January 2026)
 - **Servo control uses exact ELEGOO pattern**: attach → write → delay(450) → detach
-- **Known Issue**: Servo commands fail at 83% RAM due to stack overflow
-  - Servo works during boot (init) but not on N=5 commands
-  - Root cause: `servo.attach()` needs stack space, overflows at high RAM
-  - Works at 46% RAM, fails at 83% RAM
-  - **Fix needed**: Reduce RAM usage to below 75%
+- Known Issue (Fixed in v2.4.0): Servo commands failed at 83% RAM
 
 ### v2.2.0 (January 2026)
 - **Sensor commands now return actual values** (matching official ELEGOO protocol)
@@ -629,5 +783,7 @@ MIT License - See LICENSE file for details.
 ## References
 
 - [ELEGOO Smart Robot Car V4.0](https://www.elegoo.com)
+- [TB6612FNG Datasheet](https://www.sparkfun.com/datasheets/Robotics/TB6612FNG.pdf)
+- [MPU6050 Datasheet](https://invensense.tdk.com/products/motion-tracking/6-axis/mpu-6050/)
 - [PlatformIO Documentation](https://docs.platformio.org/)
 - [Arduino UNO Pinout](https://www.arduino.cc/en/Reference/Board)

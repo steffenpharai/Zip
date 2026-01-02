@@ -4,11 +4,16 @@
  * System-wide configuration for ZIP Robot Firmware
  * 
  * IMPORTANT: Arduino UNO has only 2KB RAM!
- * Current usage target: < 85% (< 1700 bytes)
+ * Current usage target: < 75% (< 1536 bytes) for servo reliability
+ * 
+ * Hardware: ELEGOO UNO R3 + SmartCar-Shield-v1.1 (TB6612FNG motor driver)
  */
 
 #ifndef CONFIG_H
 #define CONFIG_H
+
+// Board header provides HARDWARE_PROFILE, FW_VERSION, and pin definitions
+#include "board/board_elegoo_uno_smartcar_shield_v11.h"
 
 // Serial Communication
 // Note: Official ELEGOO uses 9600, we use 115200 for better performance
@@ -43,21 +48,20 @@
 #define MOTION_MACRO_TTL_MAX_MS 10000
 #define MOTION_RATE_LIMIT_HZ 50  // Max commands per second
 
-// Motor Control (Official ELEGOO parameters)
+// Motor Control (TB6612FNG parameters)
 // Note: Official ELEGOO code has NO ramping - PWM is applied immediately
 // Setting ramp rate to 255 effectively disables ramping for immediate response
-#define MOTOR_RAMP_RATE_MAX 255      // Disable ramping (official: instant PWM apply)
-#define MOTOR_PWM_DEADBAND 10        // Minimum PWM to overcome friction (official minimum)
-#define MOTOR_BRAKE_MODE true        // Use brake mode (vs coast)
-#define MOTOR_SPEED_ROCKER 250       // Official rocker/joystick default speed
-#define MOTOR_SPEED_TRACKING 100     // Official line tracking speed
-#define MOTOR_SPEED_OBSTACLE 150     // Official obstacle avoidance speed
-#define MOTOR_SPEED_FOLLOW 100       // Official following mode forward speed
-#define MOTOR_SPEED_TURN 150         // Official turning speed
+#define MOTOR_RAMP_RATE_DEFAULT 255   // Disable ramping (official: instant PWM apply)
+#define MOTOR_BRAKE_MODE true         // Use brake mode (vs coast)
+#define MOTOR_SPEED_ROCKER 250        // Official rocker/joystick default speed
+#define MOTOR_SPEED_TRACKING 100      // Official line tracking speed
+#define MOTOR_SPEED_OBSTACLE 150      // Official obstacle avoidance speed
+#define MOTOR_SPEED_FOLLOW 100        // Official following mode forward speed
+#define MOTOR_SPEED_TURN 150          // Official turning speed
 
 // Sensor Rates
 #define ULTRASONIC_MAX_RATE_HZ 10    // Maximum ultrasonic reads per second
-#define IMU_SAMPLE_RATE_HZ 50        // IMU sampling rate
+#define IMU_SAMPLE_RATE_HZ 10        // IMU sampling rate (10Hz in sensors_slow task)
 
 // Safety
 #define WATCHDOG_TIMEOUT_MS 4000     // Watchdog timeout (4 seconds) - increased to prevent reset loop
@@ -67,23 +71,16 @@
 // JSON parsing (see JSON_DOC_SIZE above for StaticJsonDocument size)
 // JSON_BUFFER_SIZE removed - using ring buffer instead
 
-// Firmware Version
-#define FW_VERSION_MAJOR 1
-#define FW_VERSION_MINOR 0
-#define FW_VERSION_PATCH 0
-#define FW_VERSION_STRING "1.0.0"
-
 // Capability Flags
 #define CAP_MOTOR_DRIVER_TB6612 (1 << 0)
-#define CAP_MOTOR_DRIVER_DRV8835 (1 << 1)
-#define CAP_IMU_MPU6050 (1 << 2)
-#define CAP_IMU_QMI8658C (1 << 3)
-#define CAP_ULTRASONIC (1 << 4)
-#define CAP_LINE_TRACKING (1 << 5)
-#define CAP_SERVO (1 << 6)
-#define CAP_RGB_LED (1 << 7)
+#define CAP_IMU_MPU6050 (1 << 1)
+#define CAP_ULTRASONIC (1 << 2)
+#define CAP_LINE_TRACKING (1 << 3)
+#define CAP_SERVO (1 << 4)
+#define CAP_RGB_LED (1 << 5)
 
-// Default Capabilities (TB6612 + MPU6050 + all sensors)
+// Default Capabilities (TB6612FNG + MPU6050 + all sensors)
+// Configured for SmartCar Shield v1.1 with TB6612FNG
 #define DEFAULT_CAPABILITIES (CAP_MOTOR_DRIVER_TB6612 | CAP_IMU_MPU6050 | CAP_ULTRASONIC | CAP_LINE_TRACKING | CAP_SERVO | CAP_RGB_LED)
 
 // Self-Test Configuration
@@ -95,5 +92,8 @@
 #define LED_BRIGHTNESS_DEFAULT 20
 #define LED_BRIGHTNESS_MAX 255
 
-#endif // CONFIG_H
+// IMU Configuration
+#define IMU_ENABLED true          // Enable MPU6050 IMU
+#define IMU_CALIBRATION_SAMPLES 50  // Number of samples for gyro calibration
 
+#endif // CONFIG_H
