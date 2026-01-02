@@ -366,11 +366,30 @@ void handleLegacyCommand(const ParsedCommand& cmd) {
     
     case 23: {
       // N=23: Battery voltage (ZIP extension)
-      // Returns voltage in millivolts
-      uint16_t voltage_mv = (uint16_t)(batteryMonitor.readVoltage() * 1000);
-      char valueStr[8];
-      snprintf(valueStr, sizeof(valueStr), "%u", voltage_mv);
-      JsonProtocol::sendValue(cmd.H, valueStr);
+      // D1=0 (default): Returns voltage in millivolts
+      // D1=1: Returns raw ADC value and voltage for diagnostics
+      if (cmd.D1 == 1) {
+        // Diagnostic mode: show raw ADC + calculated voltage
+        uint16_t adc = analogRead(PIN_VOLTAGE);
+        uint16_t voltage_mv = (uint16_t)(batteryMonitor.readVoltage() * 1000);
+        // Calculate expected A3 pin voltage (mV) = adc / 1023 * 5000
+        uint16_t a3_mv = (uint16_t)((adc * 5000UL) / 1023);
+        Serial.print(F("{"));
+        Serial.print(cmd.H);
+        Serial.print(F("_adc:"));
+        Serial.print(adc);
+        Serial.print(F(",a3_mv:"));
+        Serial.print(a3_mv);
+        Serial.print(F(",batt_mv:"));
+        Serial.print(voltage_mv);
+        Serial.println(F("}"));
+      } else {
+        // Normal mode: just voltage in millivolts
+        uint16_t voltage_mv = (uint16_t)(batteryMonitor.readVoltage() * 1000);
+        char valueStr[8];
+        snprintf(valueStr, sizeof(valueStr), "%u", voltage_mv);
+        JsonProtocol::sendValue(cmd.H, valueStr);
+      }
       return;
     }
     
