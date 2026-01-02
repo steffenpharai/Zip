@@ -24,6 +24,7 @@ const path = require('path');
 // Configuration
 const BAUD_RATE = 115200;
 const RESET_DELAY_MS = 600;
+const INIT_SEQUENCE_MS = 3500;  // Wait for init sequence to complete (bootloader + setup + init ~3s)
 
 // SLOW MOTION SETTINGS - Keep robot within 0.5 foot radius
 const SLOW_PWM = 80;        // Very slow speed (0-255)
@@ -637,6 +638,10 @@ async function runTest() {
     
     console.log(`Waiting ${RESET_DELAY_MS}ms for DTR reset...`);
     await sleep(RESET_DELAY_MS);
+    
+    // Wait for init sequence to complete
+    console.log(`Waiting ${INIT_SEQUENCE_MS}ms for init sequence...`);
+    await sleep(INIT_SEQUENCE_MS);
     
     // Hello handshake
     console.log('\n--- Hello Handshake ---');

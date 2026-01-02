@@ -74,8 +74,12 @@
 #include "motion/motion_controller.h"
 #include "motion/macro_engine.h"
 #include "motion/safety.h"
+#include "motion/drive_safety_layer.h"
 #include "serial/frame_parser.h"
 #include "serial/json_protocol.h"
+
+// Core
+#include "core/init_sequence.h"
 
 // Self-test
 #include "self_test.h"
@@ -111,8 +115,8 @@ static int16_t directRightPWM = 0;
 static uint8_t g_resetCounter = 0;
 static char g_lastOwner = 'I';  // I=Idle, D=Direct, M=Motion, X=Stopped
 
-// IMU initialization status
-static bool g_imuInitialized = false;
+// IMU initialization status (non-static for access from init_sequence)
+bool g_imuInitialized = false;
 
 // Boot-time battery voltage (mV)
 static uint16_t g_bootBatteryMv = 0;
@@ -183,6 +187,12 @@ void hardwareValidation() {
 
 // Task: Control loop (50Hz)
 void task_control_loop() {
+  // Run init sequence state machine if active
+  if (initSequence.isRunning()) {
+    initSequence.update();
+    return;  // Don't run normal motion control during init
+  }
+  
   // Only update motion controller for N=200 commands (but skip if DIRECT mode)
   if (motionController.getState() != MOTION_STATE_DIRECT) {
     motionController.update();
@@ -203,6 +213,10 @@ void task_sensors_slow() {
   ultrasonic.getDistance();
   batteryMonitor.update();
   lineSensor.readAll(nullptr, nullptr, nullptr);  // Cache line sensor values
+  
+  // Update drive safety layer with current battery voltage
+  uint16_t voltage_mv = (uint16_t)(batteryMonitor.readVoltage() * 1000);
+  driveSafety.updateBatteryState(voltage_mv);
   
   // Update IMU at 10Hz (non-blocking I2C read)
   if (g_imuInitialized) {
@@ -266,10 +280,12 @@ void task_protocol_rx() {
           updateMinFreeRam();  // Probe after servo path
           JsonProtocol::sendOk(cmd.H);
         } else if (cmd.N == 120) {
-          // N=120: Diagnostics - compact debug state + HW + RAM + IMU
-          // Format: {owner,lpwm,rpwm,mstate,reset,hw:<hash>,imu:<0/1>,ram:<free>,min:<min>}
+          // N=120: Diagnostics - compact debug state + HW + RAM + IMU + safety layer + init
+          // Format: {owner,lpwm,rpwm,mstate,reset,hw:<hash>,imu:<0/1>,ram:<free>,min:<min>,
+          //          batt:<mV>,b:<state>,cap:<max>,db:<L>/<R>,ramp:<a>/<d>,kick:<0/1>,init:<state>}
           updateMinFreeRam();  // Probe at diagnostics path
-          if (Serial.availableForWrite() >= 60) {
+          if (Serial.availableForWrite() >= 100) {
+            uint16_t voltage_mv = (uint16_t)(batteryMonitor.readVoltage() * 1000);
             Serial.print(F("{"));
             Serial.print(g_lastOwner);
             Serial.print(directLeftPWM);
@@ -287,9 +303,88 @@ void task_protocol_rx() {
             Serial.print(freeRam());
             Serial.print(F(",min:"));
             Serial.print(g_minFreeRam);
+            // Safety layer fields
+            Serial.print(F(",batt:"));
+            Serial.print(voltage_mv);
+            Serial.print(F(",b:"));
+            Serial.print((uint8_t)driveSafety.getBatteryState());
+            Serial.print(F(",cap:"));
+            Serial.print(driveSafety.getEffectiveMaxPwm());
+            Serial.print(F(",db:"));
+            Serial.print(driveSafety.getDeadbandL());
+            Serial.print('/');
+            Serial.print(driveSafety.getDeadbandR());
+            Serial.print(F(",ramp:"));
+            Serial.print(driveSafety.getEffectiveAccelStep());
+            Serial.print('/');
+            Serial.print(driveSafety.getEffectiveDecelStep());
+            Serial.print(F(",kick:"));
+            Serial.print(driveSafety.isKickEnabled() ? 1 : 0);
+            // Init sequence state
+            Serial.print(F(",init:"));
+            Serial.print((uint8_t)initSequence.getState());
             Serial.println('}');
           }
           JsonProtocol::sendStats(g_parseStats);
+        } else if (cmd.N == 130) {
+          // N=130: Re-run Init Sequence
+          // Stops motors, resets state, runs init sequence again
+          motionController.stop();
+          macroEngine.cancel();
+          driveSafety.resetSlew();
+          initSequence.requestRerun();
+          JsonProtocol::sendOk(cmd.H);
+        } else if (cmd.N == 140) {
+          // N=140: Set Drive Config
+          // D1: parameter selector, D2: value
+          // 1=deadband (high=L, low=R), 2=accel step, 3=decel step, 4=kick enable, 5=max PWM cap
+          switch (cmd.D1) {
+            case 1: {
+              // Deadband: D2 high byte = L, low byte = R
+              uint8_t dbL = (cmd.D2 >> 8) & 0xFF;
+              uint8_t dbR = cmd.D2 & 0xFF;
+              if (dbL == 0) dbL = PWM_DEADBAND_L_DEFAULT;
+              if (dbR == 0) dbR = PWM_DEADBAND_R_DEFAULT;
+              driveSafety.setDeadbandL(dbL);
+              driveSafety.setDeadbandR(dbR);
+              break;
+            }
+            case 2:
+              // Accel step (0 = use battery-based default)
+              if (cmd.D2 == 0) {
+                driveSafety.clearAccelOverride();
+              } else {
+                driveSafety.setAccelStep(constrain(cmd.D2, 1, 50));
+              }
+              break;
+            case 3:
+              // Decel step (0 = use battery-based default)
+              if (cmd.D2 == 0) {
+                driveSafety.clearDecelOverride();
+              } else {
+                driveSafety.setDecelStep(constrain(cmd.D2, 1, 50));
+              }
+              break;
+            case 4:
+              // Kick enable (0/1, 0xFF = use default)
+              if (cmd.D2 == 0xFF || cmd.D2 > 1) {
+                driveSafety.clearKickOverride();
+              } else {
+                driveSafety.setKickEnabled(cmd.D2 == 1);
+              }
+              break;
+            case 5:
+              // Max PWM cap (0 = use battery-based default)
+              if (cmd.D2 == 0) {
+                driveSafety.clearMaxPwmOverride();
+              } else {
+                driveSafety.setMaxPwmCap(constrain(cmd.D2, 50, 255));
+              }
+              break;
+            default:
+              break;
+          }
+          JsonProtocol::sendOk(cmd.H);
         } else if (cmd.N >= 200) {
           // N=200+: Motion commands
           handleMotionCommand(cmd);
@@ -453,6 +548,8 @@ void handleMotionCommand(const ParsedCommand& cmd) {
       // Update state machines (these no longer touch motor pins)
       motionController.stop();  // Sets state to IDLE
       macroEngine.cancel();     // Sets active to false
+      initSequence.abort();     // Abort init if running
+      driveSafety.resetSlew();  // Reset safety layer slew state
       
       // SINGLE MOTOR WRITE POINT - only here we touch motor pins for stop
       // TB6612FNG: Set PWM to 0 AND disable STBY
@@ -480,6 +577,11 @@ void handleMotionCommand(const ParsedCommand& cmd) {
       // Apply PWM directly to pins using TB6612FNG direction logic
       int16_t left = constrain(cmd.D1, -255, 255);
       int16_t right = constrain(cmd.D2, -255, 255);
+      
+#if SAFETY_LAYER_ENABLED && !SAFETY_LAYER_BYPASS_DIRECT
+      // Apply safety layer limits (battery-aware cap, ramping, deadband)
+      driveSafety.applyLimits(&left, &right);
+#endif
       
       // CRITICAL: Enable motor driver (TB6612FNG requires STBY=HIGH)
       digitalWrite(PIN_MOTOR_STBY, HIGH);
@@ -510,7 +612,7 @@ void handleMotionCommand(const ParsedCommand& cmd) {
         analogWrite(PIN_MOTOR_PWMB, 0);
       }
       
-      // Store values for diagnostics
+      // Store values for diagnostics (after safety layer applied)
       directLeftPWM = left;
       directRightPWM = right;
       
@@ -594,6 +696,8 @@ void setup() {
   motionController.init(&motorDriver);
   macroEngine.init(&motorDriver);
   safetyLayer.init();
+  driveSafety.init();
+  initSequence.init();
   
   // Initialize scheduler
   scheduler.init();
@@ -607,6 +711,9 @@ void setup() {
   // Enable watchdog (8 seconds)
   wdt_enable(WDTO_8S);
   wdt_reset();
+  
+  // Start init sequence (runs in task_control_loop, non-blocking)
+  initSequence.start();
   
   // Send ready marker: "R\n"
   // Host waits for this after DTR reset

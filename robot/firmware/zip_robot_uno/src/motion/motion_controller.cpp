@@ -3,6 +3,7 @@
  */
 
 #include "motion_controller.h"
+#include "../../include/motion/drive_safety_layer.h"
 
 // Official ELEGOO differential mixing constant
 const float MotionController::DIFF_MIX_K = 1.0f;  // k in left = v - k*w, right = v + k*w
@@ -82,6 +83,11 @@ void MotionController::setSetpoint(int16_t v, int16_t w, uint32_t ttl_ms) {
     int16_t targetLeft, targetRight;
     applyDifferentialMix(v, w, targetLeft, targetRight);
     
+#if SAFETY_LAYER_ENABLED
+    // Apply safety layer limits (battery-aware cap, ramping, deadband, kickstart)
+    driveSafety.applyLimits(&targetLeft, &targetRight);
+#endif
+    
     // Update current values
     currentLeft = targetLeft;
     currentRight = targetRight;
@@ -113,7 +119,12 @@ void MotionController::update() {
   int16_t targetLeft, targetRight;
   applyDifferentialMix(currentSetpoint.v, currentSetpoint.w, targetLeft, targetRight);
   
-  // Update current values to match targets (no slew limiting for immediate response)
+#if SAFETY_LAYER_ENABLED
+  // Apply safety layer limits (battery-aware cap, ramping, deadband, kickstart)
+  driveSafety.applyLimits(&targetLeft, &targetRight);
+#endif
+  
+  // Update current values to match targets
   currentLeft = targetLeft;
   currentRight = targetRight;
   

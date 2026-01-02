@@ -57,9 +57,9 @@
 
 // Firmware version
 #define FW_VERSION_MAJOR 2
-#define FW_VERSION_MINOR 7
+#define FW_VERSION_MINOR 8
 #define FW_VERSION_PATCH 0
-#define FW_VERSION_STRING "2.7.0"
+#define FW_VERSION_STRING "2.8.0"
 
 // ============================================================================
 // MOTOR DRIVER - TB6612FNG (Toshiba dual H-bridge)
@@ -151,6 +151,80 @@
 #define MOTOR_RAMP_RATE_MAX     255   // Max PWM change per update (255 = no ramping)
 #define MOTOR_KICKSTART_PWM     80    // Brief pulse PWM to overcome static friction
 #define MOTOR_KICKSTART_MS      20    // Kickstart pulse duration
+
+// ============================================================================
+// DRIVE SAFETY LAYER CONSTANTS
+// ============================================================================
+// Battery state thresholds (millivolts)
+// These can be overridden in config.h or at compile time
+#ifndef BATT_THRESH_OK_MV
+#define BATT_THRESH_OK_MV       7400  // >= this is OK state
+#endif
+#ifndef BATT_THRESH_LOW_MV
+#define BATT_THRESH_LOW_MV      7000  // >= this and < OK is LOW state; < this is CRIT
+#endif
+
+// PWM deadband per wheel (minimum PWM to overcome static friction under load)
+// Determined via drive_calibrate.js tool - these are conservative defaults
+#ifndef PWM_DEADBAND_L_DEFAULT
+#define PWM_DEADBAND_L_DEFAULT  55    // Left wheel deadband
+#endif
+#ifndef PWM_DEADBAND_R_DEFAULT
+#define PWM_DEADBAND_R_DEFAULT  55    // Right wheel deadband
+#endif
+
+// Slew rate limits (PWM units per 50Hz tick = per 20ms)
+// Asymmetric: acceleration slower than deceleration for safety
+// OK battery state
+#ifndef RAMP_ACCEL_STEP_OK
+#define RAMP_ACCEL_STEP_OK      12    // ~600 PWM/sec acceleration
+#endif
+#ifndef RAMP_DECEL_STEP_OK
+#define RAMP_DECEL_STEP_OK      20    // ~1000 PWM/sec deceleration
+#endif
+
+// LOW battery state (gentler to prevent brownouts)
+#ifndef RAMP_ACCEL_STEP_LOW
+#define RAMP_ACCEL_STEP_LOW     6     // ~300 PWM/sec acceleration
+#endif
+#ifndef RAMP_DECEL_STEP_LOW
+#define RAMP_DECEL_STEP_LOW     15    // ~750 PWM/sec deceleration
+#endif
+
+// CRIT battery state (very gentle)
+#ifndef RAMP_ACCEL_STEP_CRIT
+#define RAMP_ACCEL_STEP_CRIT    4     // ~200 PWM/sec acceleration
+#endif
+#ifndef RAMP_DECEL_STEP_CRIT
+#define RAMP_DECEL_STEP_CRIT    10    // ~500 PWM/sec deceleration
+#endif
+
+// PWM caps by battery state
+#ifndef PWM_CAP_OK
+#define PWM_CAP_OK              255   // Full power when battery OK
+#endif
+#ifndef PWM_CAP_LOW
+#define PWM_CAP_LOW             180   // Reduced power when battery low
+#endif
+#ifndef PWM_CAP_CRIT
+#define PWM_CAP_CRIT            100   // Minimal power when battery critical
+#endif
+
+// Kickstart pulse configuration
+#ifndef KICKSTART_DURATION_TICKS
+#define KICKSTART_DURATION_TICKS 4    // 80ms at 50Hz control loop
+#endif
+#ifndef KICKSTART_BOOST
+#define KICKSTART_BOOST         25    // PWM added to deadband during kickstart
+#endif
+
+// Init sequence motor test PWM
+#ifndef INIT_MOTOR_PWM
+#define INIT_MOTOR_PWM          80    // PWM for init motor direction tests
+#endif
+#ifndef INIT_MOTOR_PWM_LOW_BATT
+#define INIT_MOTOR_PWM_LOW_BATT 60    // Reduced PWM when battery is low
+#endif
 
 // ============================================================================
 // SERVO CONSTANTS

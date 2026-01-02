@@ -4,17 +4,20 @@ Production-grade firmware for ELEGOO Smart Robot Car V4.0 on Arduino UNO.
 
 **Hardware: ELEGOO UNO R3 + SmartCar-Shield-v1.1 (TB6612FNG Motor Driver)**
 
-**Verified Configuration (January 2026) - v2.7.0**
-- RAM: 57.1% (1170/2048 bytes) ✅ Well under 75% threshold
-- Flash: 54.6% (17620/32256 bytes)
+**Verified Configuration (January 2026) - v2.8.0**
+- RAM: 59.0% (1208/2048 bytes) ✅ Well under 75% threshold
+- Flash: 68.3% (22016/32256 bytes)
 - All motion tests passing
 - Servo control: **Working** ✅
 - IMU (MPU6050): **Enabled** ✅ (10Hz polling)
 - Sensor commands return actual values (N=21, N=22, N=23)
+- **NEW**: Drive Safety Layer (battery-aware limiting, deadband, ramping)
+- **NEW**: Init Sequence (non-blocking hardware validation on boot)
 
 ✅ **TB6612FNG Support**: Motor driver configured for V1_20230201 kit (TB6612FNG with STBY pin).
 ✅ **IMU Enabled**: MPU6050 now active at 10Hz polling rate.
 ✅ **Board-Correct by Construction**: Firmware locked to verified hardware stack.
+✅ **Drive Safety**: Battery-aware PWM limiting, deadband compensation, slew-rate ramping.
 
 ---
 
@@ -207,7 +210,8 @@ All pin definitions are in `include/board/board_elegoo_uno_smartcar_shield_v11.h
 | `modeButton` | ✅ | - | minimal | Digital input |
 | `motionController` | ✅ | control_loop | minimal | Setpoint tracking |
 | `macroEngine` | ✅ | control_loop | minimal | Motion macros |
-| `safetyLayer` | ✅ | - | minimal | Safety checks |
+| `driveSafety` | ✅ | control_loop | ~30 bytes | Battery-aware drive limiting |
+| `initSequence` | ✅ | control_loop | ~20 bytes | Boot-time hardware validation |
 
 ### Disabled/Removed Subsystems
 
@@ -272,8 +276,8 @@ pio device monitor -b 115200
 ### Expected Build Output
 
 ```
-RAM:   [======    ]  57.1% (used 1170 bytes from 2048 bytes)
-Flash: [=====     ]  54.6% (used 17620 bytes from 32256 bytes)
+RAM:   [======    ]  59.0% (used 1208 bytes from 2048 bytes)
+Flash: [=======   ]  68.3% (used 22016 bytes from 32256 bytes)
 ```
 
 ✅ **RAM Headroom**: Still plenty of stack space for servo operations and function calls.
@@ -283,7 +287,10 @@ Flash: [=====     ]  54.6% (used 17620 bytes from 32256 bytes)
 ```
 HW:ELGV11TB imu=1 batt=7400
 R
+INIT:done batt=7400 imu=1 yaw=12
 ```
+
+The init sequence runs motor pulses to validate drivetrain (~1.7 seconds).
 
 ---
 
@@ -295,7 +302,11 @@ R
 |--------|----------|---------|
 | `tools/serial_motor_bringup.js` | Node.js | Motor/motion tests |
 | `tools/hardware_smoke.js` | Node.js | Quick hardware validation |
+| `tools/drive_calibrate.js` | Node.js | Interactive deadband calibration |
+| `tools/serial_motion_test.js` | Node.js | Extended motion validation |
 | `test_servo_rotation.py` | Python | Servo control tests |
+
+**Note**: Test scripts wait ~3.5 seconds after port open for the init sequence to complete.
 
 ### Motor Test: `serial_motor_bringup.js`
 
@@ -444,17 +455,19 @@ Format: NDJSON (one JSON object per line)
 
 | N | Command | Parameters | Response | Description |
 |---|---------|------------|----------|-------------|
-| 0 | Hello | - | `{H_ok}` | Handshake/ping |
+| 0 | Hello | - | `{hello_ok}` | Handshake/ping |
 | 5 | Servo | D1=angle | `{H_ok}` | Pan servo control (0-180°) |
 | 21 | Ultrasonic | D1=mode | `{H_<value>}` | Distance/obstacle sensor |
 | 22 | Line Sensor | D1=sensor | `{H_<value>}` | IR line sensor (L/M/R) |
 | 23 | Battery | - | `{H_<mV>}` | Battery voltage |
-| 120 | Diagnostics | - | `{<state>...}` | Debug state dump (includes IMU, HW profile) |
+| 120 | Diagnostics | - | `{<state>...}` | Debug state dump (includes safety layer) |
+| 130 | Re-run Init | - | `{H_ok}` | Re-run initialization sequence |
+| 140 | Set Config | D1=param, D2=val | `{H_ok}` | Set drive safety config |
 | 200 | Setpoint | D1=v, D2=w, T=ttl | (none) | Streaming motion |
-| 201 | Stop | - | `{H_ok}` | Immediate stop |
+| 201 | Stop | - | `{H_ok}` | Immediate stop (preempts everything) |
 | 210 | Macro Start | D1=id | `{H_ok}` | Start macro |
 | 211 | Macro Cancel | - | `{H_ok}` | Cancel macro |
-| 999 | Direct Motor | D1=L, D2=R | `{H_ok}` | Raw PWM control |
+| 999 | Direct Motor | D1=L, D2=R | `{H_ok}` | Raw PWM control (through safety layer) |
 
 ### Sensor Commands (N=21-23)
 
@@ -487,8 +500,8 @@ These commands return actual sensor values in the response.
 ### Diagnostics Response (N=120)
 
 ```
-{<owner><L>,<R>,<state>,<resets>,hw:<hash>,imu:<0/1>,ram:<free>,min:<min>}
-{stats:rx=<rx>,jd=<jd>,pe=<pe>,bc=<bc>,tx=<tx>,ms=<ms>}
+{<owner><L>,<R>,<state>,<resets>,hw:<hash>,imu:<0/1>,ram:<free>,min:<min>,batt:<mV>,b:<state>,cap:<max>,db:<L>/<R>,ramp:<a>/<d>,kick:<0/1>,init:<state>}
+{stats:rx=<rx>,jd=<jd>,pe=<pe>,tx=<tx>,ms=<ms>}
 ```
 
 | Field | Values | Description |
@@ -501,6 +514,31 @@ These commands return actual sensor values in the response.
 | imu | 0/1 | IMU initialization status |
 | ram | bytes | Current free RAM |
 | min | bytes | Minimum observed free RAM |
+| batt | mV | Battery voltage in millivolts |
+| b | 0/1/2 | Battery state (0=OK, 1=LOW, 2=CRIT) |
+| cap | 0-255 | Current max PWM cap |
+| db | L/R | Deadband values (left/right) |
+| ramp | a/d | Ramp steps (accel/decel per tick) |
+| kick | 0/1 | Kickstart enabled |
+| init | 0-3 | Init state (0=pending, 1=running, 2=done, 3=warn) |
+
+### Drive Config Command (N=140)
+
+Set runtime drive safety parameters:
+
+| D1 | Parameter | D2 Value |
+|----|-----------|----------|
+| 1 | Deadband | High byte=Left, Low byte=Right (0-255 each) |
+| 2 | Ramp Accel Step | 0-50 (PWM per tick) |
+| 3 | Ramp Decel Step | 0-50 (PWM per tick) |
+| 4 | Kickstart Enable | 0=off, 1=on |
+| 5 | Max PWM Cap | 0-255 |
+
+**Example:**
+```json
+{"N":140,"H":"cfg","D1":1,"D2":14135}  // Set deadband L=55, R=55 (55<<8|55)
+{"N":140,"H":"cfg","D1":4,"D2":0}      // Disable kickstart
+```
 
 ### Direct Motor Control (N=999)
 
@@ -601,9 +639,9 @@ python test_servo_rotation.py --port COM5 --all
 - **Total RAM**: 2048 bytes
 - **Safe Limit for basic commands**: ~85% (1740 bytes)
 - **Safe Limit for servo control**: ~75% (1536 bytes) - servo.attach() needs stack space
-- **Current Usage**: 57.1% (1170 bytes) ✅
+- **Current Usage**: 59.0% (1208 bytes) ✅
 
-✅ **RAM Optimized**: TB6612FNG driver + IMU still well under 75% threshold.
+✅ **RAM Optimized**: TB6612FNG driver + IMU + Drive Safety Layer + Init Sequence still well under 75% threshold.
 
 ### What Uses RAM
 
@@ -615,7 +653,9 @@ python test_servo_rotation.py --port COM5 --all
 | Motor driver | ~20 bytes | State + config |
 | IMU | ~60 bytes | Calibration offsets + yaw |
 | Sensors | ~30 bytes | Cached values |
-| Stack | ~700 bytes | **Available** for function calls |
+| Drive Safety | ~30 bytes | Config + state machine |
+| Init Sequence | ~20 bytes | State + warn bits |
+| Stack | ~660 bytes | **Available** for function calls |
 
 ### What Broke (and Why) - All Fixed ✅
 
@@ -678,9 +718,18 @@ python test_servo_rotation.py --port COM5 --all
 ### Test Script Fails
 
 1. Ensure correct COM port
-2. Wait for DTR reset (600ms)
+2. Wait for init sequence (~3.5 seconds after port open)
 3. Check Node.js serialport installed
 4. Verify firmware is uploaded
+5. Check for `INIT:done` or `INIT:warn` in boot output
+
+### Init Sequence Issues
+
+1. **Motors pulse on boot**: Normal - init validates drivetrain with short pulses
+2. **`INIT:warn` with `batt_low`**: Battery voltage below 7000mV, reduced PWM used
+3. **`INIT:warn` with `imu_missing`**: MPU6050 not detected at I2C 0x68
+4. **`INIT:warn` with `imu_no_motion`**: IMU detected but yaw didn't change during spins
+5. **Init takes >3 seconds**: Check for serial congestion, reduce debug output
 
 ### Servo Doesn't Move
 
@@ -700,7 +749,31 @@ python test_servo_rotation.py --port COM5 --all
 
 ## Version History
 
-### v2.7.0 (January 2026) - Current
+### v2.8.0 (January 2026) - Current
+- **Drive Safety Layer**: Battery-aware motion control
+  - Battery state detection: OK (≥7400mV), LOW (7000-7399mV), CRIT (<7000mV)
+  - Dynamic PWM cap reduction in LOW/CRIT states
+  - PWM deadband compensation (configurable per motor, default 55)
+  - Slew-rate limiting with asymmetric accel/decel ramping
+  - Optional kickstart pulse for overcoming static friction
+  - All motor outputs (N=200, N=999) go through safety layer
+- **Init Sequence**: Non-blocking boot-time hardware validation (~1.7s)
+  - TB6612 STBY setup
+  - Servo center (90°)
+  - Sensor smoke checks (battery, ultrasonic, line sensors, IMU)
+  - Motor direction pulses (forward, reverse, spin L/R)
+  - IMU response check during spins
+  - Status: `INIT:done/warn batt=<mV> imu=<0/1> yaw=<delta>`
+- **New commands**:
+  - N=130: Re-run init sequence
+  - N=140: Set drive config (deadband, ramp, kickstart, PWM cap)
+- **Enhanced diagnostics (N=120)**: Now includes batt, b, cap, db, ramp, kick, init fields
+- **New tool**: `tools/drive_calibrate.js` - Interactive deadband calibration
+- **Test timing**: All tools now wait 3.5s after port open for init sequence
+- **RAM**: 59.0% (1208 bytes)
+- **Flash**: 68.3% (22016 bytes)
+
+### v2.7.0 (January 2026)
 - **Board-correct by construction**: Firmware locked to verified hardware stack
   - New canonical board header: `board_elegoo_uno_smartcar_shield_v11.h`
   - MCU guard: `#error` if not ATmega328P

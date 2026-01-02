@@ -3,6 +3,7 @@
  */
 
 #include "macro_engine.h"
+#include "../../include/motion/drive_safety_layer.h"
 
 // FIGURE_8 macro steps (using official ELEGOO obstacle avoidance speed ~150)
 const MacroEngine::MacroStep MacroEngine::figure8_steps[] = {
@@ -149,6 +150,12 @@ void MacroEngine::update() {
   int16_t right = state.targetV + state.targetW;
   left = constrain(left, -255, 255);
   right = constrain(right, -255, 255);
+  
+#if SAFETY_LAYER_ENABLED
+  // Apply safety layer limits (battery-aware cap, ramping, deadband, kickstart)
+  driveSafety.applyLimits(&left, &right);
+#endif
+  
   motorDriver->setMotors(left, right);
 }
 

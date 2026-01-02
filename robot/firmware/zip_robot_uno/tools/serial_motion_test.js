@@ -164,6 +164,10 @@ async function runTest() {
     console.log(`Waiting ${RESET_DELAY_MS}ms for DTR reset...`);
     await sleep(RESET_DELAY_MS);
     
+    // Wait for init sequence to complete (bootloader + setup + init ~3s)
+    console.log('Waiting 3500ms for init sequence...');
+    await sleep(3500);
+    
     // Flush any garbage
     drainResponses();
     
