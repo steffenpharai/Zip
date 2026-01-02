@@ -1,0 +1,117 @@
+services:
+  zip-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OPENAI_API_KEY: ${OPENAI_API_KEY}
+        OPENAI_REALTIME_MODEL: ${OPENAI_REALTIME_MODEL:-}
+        OPENAI_RESPONSES_MODEL: ${OPENAI_RESPONSES_MODEL:-}
+        OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-}
+        OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-}
+        OPENAI_STT_MODEL: ${OPENAI_STT_MODEL:-}
+        ZIP_REALTIME_ENABLED: ${ZIP_REALTIME_ENABLED:-true}
+        ZIP_VOICE_FALLBACK_ENABLED: ${ZIP_VOICE_FALLBACK_ENABLED:-true}
+    container_name: zip-app-prod
+    ports:
+      - "3000:3000"
+    volumes:
+      # Only mount data directory for persistence (no source code)
+      - ./data:/app/data:rw
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      - NEXT_PUBLIC_ROBOT_BRIDGE_WS_URL=ws://robot-bridge:8765/robot
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - zip-network
+    depends_on:
+      robot-bridge:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # Set to true if data directory is mounted read-write separately
+
+  robot-bridge:
+    build:
+      context: ./robot/bridge/zip-robot-bridge
+      dockerfile: Dockerfile
+    container_name: robot-bridge-prod
+    ports:
+      - "8765:8765"  # WebSocket
+      - "8766:8766"  # HTTP
+    volumes:
+      # Only mount data if needed (logs, etc.)
+      - ./data/robot-logs:/app/logs:rw
+    environment:
+      - NODE_ENV=production
+      # Map Windows COM port to Linux device path in Docker
+      # If ROBOT_SERIAL_PORT is set (e.g., COM5), use /dev/ttyUSB0 (mapped from device)
+      # Otherwise use the SERIAL_PORT value or default to /dev/ttyUSB0
+      - SERIAL_PORT=/dev/ttyUSB0
+      - SERIAL_BAUD=${SERIAL_BAUD:-115200}
+      - WS_PORT=8765
+      - HTTP_PORT=8766
+      - LOOPBACK_MODE=${LOOPBACK_MODE:-false}
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - zip-network
+    # Serial port access - Windows COM5
+    devices:
+      - //./COM5:/dev/ttyUSB0
+    # Alternative for Linux:
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8766/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  zip-network:
+    driver: bridge
+    name: zip-network
+

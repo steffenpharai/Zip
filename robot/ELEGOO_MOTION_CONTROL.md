@@ -142,6 +142,42 @@ Execute SPIN_360 macro at intensity 200, 5s TTL.
 - Stops motors
 - Responds with `{H_ok}`
 
+### Sensor Commands (N=21..23)
+
+The firmware returns actual sensor values matching the official ELEGOO protocol:
+
+#### N=21: Ultrasonic Sensor
+
+**Request:**
+```json
+{"N":21,"H":"ultra","D1":2}   // D1=2: Get distance in cm
+{"N":21,"H":"obs","D1":1}     // D1=1: Obstacle detection (true/false)
+```
+
+**Response:**
+- D1=2: `{ultra_42}` (distance in cm, 0-400)
+- D1=1: `{obs_true}` or `{obs_false}` (obstacle within 20cm)
+
+#### N=22: Line Sensor
+
+**Request:**
+```json
+{"N":22,"H":"line0","D1":0}   // D1=0: Left sensor
+{"N":22,"H":"line1","D1":1}   // D1=1: Middle sensor
+{"N":22,"H":"line2","D1":2}   // D1=2: Right sensor
+```
+
+**Response:** `{line0_512}` (analog value 0-1023)
+
+#### N=23: Battery Voltage
+
+**Request:**
+```json
+{"N":23,"H":"batt"}
+```
+
+**Response:** `{batt_7400}` (voltage in millivolts)
+
 ### Legacy Commands (N=1..110)
 
 The firmware preserves compatibility with ELEGOO legacy commands:

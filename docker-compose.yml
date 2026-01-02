@@ -1,5 +1,5 @@
 services:
-  app:
+  zip-app:
     build:
       context: .
       dockerfile: Dockerfile.dev
@@ -18,8 +18,8 @@ services:
     volumes:
       # Mount source code for hot reloading (exclude node_modules and .next)
       - .:/app
-      - /app/node_modules
-      - /app/.next
+      - zip-app-node-modules:/app/node_modules
+      - zip-app-next-cache:/app/.next
       # Mount data directory for persistence
       - ./data:/app/data
     environment:
@@ -27,15 +27,111 @@ services:
       - WATCHPACK_POLLING=true
       - NEXT_TELEMETRY_DISABLED=1
       - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      - NEXT_PUBLIC_ROBOT_BRIDGE_WS_URL=ws://robot-bridge:8765/robot
     env_file:
       - .env
     stdin_open: true
     tty: true
     restart: unless-stopped
-    # Ensure logs are output to console
+    networks:
+      - zip-network
+    depends_on:
+      robot-bridge:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+  robot-bridge:
+    build:
+      context: ./robot/bridge/zip-robot-bridge
+      dockerfile: Dockerfile.dev
+    container_name: robot-bridge-dev
+    ports:
+      - "8765:8765"  # WebSocket
+      - "8766:8766"  # HTTP
+    volumes:
+      # Mount source code for hot reloading
+      - ./robot/bridge/zip-robot-bridge:/app
+      - robot-bridge-node-modules:/app/node_modules
+      - robot-bridge-dist:/app/dist
+    environment:
+      - NODE_ENV=development
+      # Map Windows COM port to Linux device path in Docker
+      # If ROBOT_SERIAL_PORT is set (e.g., COM5), use /dev/ttyUSB0 (mapped from device)
+      # Otherwise use the SERIAL_PORT value or default to /dev/ttyUSB0
+      # Serial port configuration for Windows/WSL2
+      # COM5 on Windows maps to /dev/ttyS4 in WSL2 (COM1=ttyS0, COM2=ttyS1, etc.)
+      # If ROBOT_SERIAL_PORT is COM5, use /dev/ttyS4
+      - SERIAL_PORT=/dev/ttyS4
+      - SERIAL_BAUD=${SERIAL_BAUD:-115200}
+      - WS_PORT=8765
+      - HTTP_PORT=8766
+      # Loopback mode (simulated robot) - set to true for testing without hardware
+      # Defaults to false to enable real hardware communication
+      - LOOPBACK_MODE=${LOOPBACK_MODE:-false}
+    # Don't load .env file to avoid SERIAL_PORT conflicts
+    # Environment variables are set explicitly above
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    networks:
+      - zip-network
+    # Serial port access for Windows/WSL2
+    # Map Windows COM5 to WSL2 /dev/ttyS4 device
+    # COM ports in WSL2: COM1=/dev/ttyS0, COM2=/dev/ttyS1, COM3=/dev/ttyS2, COM4=/dev/ttyS3, COM5=/dev/ttyS4
+    devices:
+      - /dev/ttyS4:/dev/ttyS4
+    # Use privileged mode for serial port access (required for baud rate configuration)
+    privileged: true
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8766/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  zip-network:
+    driver: bridge
+    name: zip-network
+
+volumes:
+  zip-app-node-modules:
+    name: zip-app-node-modules
+  zip-app-next-cache:
+    name: zip-app-next-cache
+  robot-bridge-node-modules:
+    name: robot-bridge-node-modules
+  robot-bridge-dist:
+    name: robot-bridge-dist
 

@@ -1,11 +1,11 @@
 /*
  * JSON Frame Parser
  * 
- * Production-grade parser for ELEGOO-style JSON commands.
- * Uses ring buffer for robust RX handling.
+ * Lightweight parser for ELEGOO-style JSON commands.
+ * Uses fixed-field scanner instead of ArduinoJson (saves 96+ bytes RAM).
  * 
  * Official ELEGOO protocol terminates JSON on '}' character.
- * Also supports binary protocol detection (0xAA 0x55 header).
+ * Binary protocol (0xAA 0x55) has been REMOVED for RAM savings.
  */
 
 #ifndef FRAME_PARSER_H
@@ -18,7 +18,7 @@ struct ParseStats {
   uint16_t rx_overflow;       // Ring buffer overflows
   uint16_t json_dropped_long; // JSON lines exceeding max length
   uint16_t parse_errors;      // JSON parse failures
-  uint16_t binary_crc_fail;   // Binary CRC failures
+  uint16_t reserved;          // Reserved (was binary_crc_fail)
   uint16_t tx_dropped;        // TX responses dropped (buffer full)
   uint32_t last_cmd_ms;       // Timestamp of last valid command
 };
@@ -41,7 +41,7 @@ public:
   FrameParser();
   
   // Process incoming byte, returns true if a complete frame was parsed
-  // Supports both JSON (terminated by '}') and binary (0xAA 0x55 header)
+  // JSON only - binary protocol removed for RAM savings
   bool processByte(uint8_t byte);
   
   // Get the last parsed command (if valid)
@@ -50,32 +50,27 @@ public:
   // Reset parser state (call after handling command or on error)
   void reset();
   
-  // Check if buffer contains binary protocol start
-  bool isBinaryProtocol() const { return isBinary; }
-  
 private:
   // Ring buffer for RX data (minimal for RAM-constrained UNO)
   static const size_t RING_SIZE = 32;  // Power of 2 for efficient modulo
   static const size_t MAX_JSON_LINE = 64;  // Max JSON line length
   
   enum State {
-    STATE_IDLE,          // Waiting for start character
-    STATE_JSON_READING,  // Reading JSON content (started with '{')
-    STATE_BINARY_HEADER, // Reading binary header (started with 0xAA)
+    STATE_IDLE,          // Waiting for start character '{'
+    STATE_JSON_READING,  // Reading JSON content
     STATE_JSON_COMPLETE  // JSON frame complete, ready to parse
   };
   
-  // Ring buffer
+  // Ring buffer (kept for potential future use, but not actively used)
   uint8_t ring[RING_SIZE];
   volatile uint8_t head;  // Write position
   volatile uint8_t tail;  // Read position
   
-  // JSON frame accumulator (extracted from ring for parsing)
+  // JSON frame accumulator
   char jsonBuffer[MAX_JSON_LINE + 1];
   size_t jsonPos;
   
   State state;
-  bool isBinary;
   ParsedCommand lastCommand;
   
   // Ring buffer helpers
@@ -84,7 +79,7 @@ private:
   uint8_t ringAvailable() const;
   void ringClear();
   
-  // JSON parsing
+  // JSON parsing (uses lightweight fixed-field scanner)
   bool parseJson();
   void resyncToNewline();
 };

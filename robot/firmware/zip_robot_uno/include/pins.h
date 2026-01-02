@@ -70,12 +70,13 @@
 #define LINE_SENSOR_ADC_MAX 1023
 #define LINE_SENSOR_THRESHOLD_DEFAULT 512
 
-// Battery Constants
+// Battery Constants (Official ELEGOO: 2x 18650 Li-ion pack)
 #define BATTERY_VOLTAGE_MIN 6.0   // Minimum safe voltage (V)
-#define BATTERY_VOLTAGE_MAX 8.4   // Maximum voltage (V)
-#define BATTERY_VOLTAGE_LOW 7.0   // Low battery warning threshold (V)
+#define BATTERY_VOLTAGE_MAX 8.4   // Maximum voltage (V) - fully charged
+#define BATTERY_VOLTAGE_LOW 7.0   // Low battery warning threshold (V) - matches official
 #define BATTERY_ADC_SCALE 0.0049  // 5V / 1024 = 0.0049V per ADC step
-#define BATTERY_DIVIDER_RATIO 2.0 // Voltage divider ratio (if used)
+// Official ELEGOO voltage divider: (10kΩ + 1.5kΩ) / 1.5kΩ = 7.67
+#define BATTERY_DIVIDER_RATIO 7.67
 
 #endif // PINS_H
 

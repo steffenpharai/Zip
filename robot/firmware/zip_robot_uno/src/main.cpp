@@ -67,12 +67,12 @@
 // Core
 #include "core/scheduler.h"
 
-// Protocol
-#include "protocol/protocol_decode.h"
-#include "protocol/protocol_encode.h"
+// Protocol (JSON only - binary protocol removed for RAM savings)
+// #include "protocol/protocol_decode.h"  // REMOVED - legacy binary protocol
+// #include "protocol/protocol_encode.h"  // REMOVED - legacy binary protocol
 
 // Behavior
-#include "behavior/command_handler.h"
+// #include "behavior/command_handler.h"  // REMOVED - uses ArduinoJson
 
 // Motion Control
 #include "motion_types.h"
@@ -96,9 +96,9 @@ StatusLED statusLED;
 ModeButton modeButton;
 
 Scheduler scheduler;
-ProtocolDecoder protocolDecoder;
-ProtocolEncoder protocolEncoder;
-CommandHandler commandHandler;
+// ProtocolDecoder protocolDecoder;  // REMOVED - legacy binary protocol
+// ProtocolEncoder protocolEncoder;  // REMOVED - legacy binary protocol
+// CommandHandler commandHandler;    // REMOVED - uses ArduinoJson
 
 // Motion Control instances
 MotionController motionController;
@@ -117,6 +117,27 @@ static int16_t directRightPWM = 0;
 // Motion ownership tracking for diagnostics (N=120)
 static uint8_t g_resetCounter = 0;
 static char g_lastOwner = 'I';  // I=Idle, D=Direct, X=Stopped
+
+// Runtime free RAM measurement (AVR classic pattern)
+// Returns bytes between stack and heap - should never go below ~150 on UNO
+extern unsigned int __bss_end;
+extern unsigned int __heap_start;
+extern void *__brkval;
+
+static int16_t g_minFreeRam = 32767;  // Track minimum observed free RAM
+
+int freeRam() {
+  int v;
+  return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
+}
+
+// Call this at critical points to track minimum headroom
+void updateMinFreeRam() {
+  int current = freeRam();
+  if (current < g_minFreeRam) {
+    g_minFreeRam = current;
+  }
+}
 
 // Task: Control loop (50Hz)
 void task_control_loop() {
@@ -150,11 +171,11 @@ void task_sensors_slow() {
   lineSensor.readAll(nullptr, nullptr, nullptr);  // Cache line sensor values
 }
 
-// Task: Telemetry (disabled by default)
-void task_telemetry() {
-  wdt_reset();
-  commandHandler.sendTELEMETRY();
-}
+// Task: Telemetry (REMOVED - legacy binary protocol)
+// void task_telemetry() {
+//   wdt_reset();
+//   commandHandler.sendTELEMETRY();
+// }
 
 // Task: Protocol RX (continuous, 1ms interval)
 // Single RX pipeline with deterministic parsing
@@ -185,16 +206,10 @@ void task_protocol_rx() {
       wdt_reset();
     }
     
-    // Check for binary protocol header (0xAA 0x55)
-    if (byte == 0xAA) {
-      // Binary protocol - use existing decoder
-      if (protocolDecoder.processByte(byte)) {
-        DecodedMessage msg;
-        if (protocolDecoder.getMessage(&msg)) {
-          commandHandler.handleMessage(msg);
-        }
-      }
-      continue;
+    // Binary protocol (0xAA 0x55) REMOVED - JSON only for RAM savings
+    // If we receive binary header, just skip it
+    if (byte == 0xAA || byte == 0x55) {
+      continue;  // Ignore legacy binary protocol bytes
     }
     
     // JSON protocol - use frame parser
@@ -215,10 +230,19 @@ void task_protocol_rx() {
         if (cmd.N == 0) {
           // N=0: Hello handshake
           JsonProtocol::sendHelloOk();
+        } else if (cmd.N == 5) {
+          // N=5: Servo control - D1 is angle (0-180)
+          // Probe RAM before servo.attach() - known stack-heavy path
+          updateMinFreeRam();
+          uint8_t angle = constrain(cmd.D1, 0, 180);
+          servoPan.setAngle(angle);
+          updateMinFreeRam();  // Probe after servo path
+          JsonProtocol::sendOk(cmd.H);
         } else if (cmd.N == 120) {
-          // N=120: Diagnostics - compact debug state
-          // #region agent log - minimal: owner,lpwm,rpwm,stby,mstate,reset#
-          if (Serial.availableForWrite() >= 20) {
+          // N=120: Diagnostics - compact debug state + RAM monitoring
+          // Format: {owner,lpwm,rpwm,stby,mstate,reset,freeRam,minRam}
+          updateMinFreeRam();  // Probe at diagnostics path
+          if (Serial.availableForWrite() >= 40) {
             Serial.print(F("{"));
             Serial.print(g_lastOwner);
             Serial.print(directLeftPWM);
@@ -230,9 +254,12 @@ void task_protocol_rx() {
             Serial.print((uint8_t)motionController.getState());
             Serial.print(',');
             Serial.print(g_resetCounter);
+            Serial.print(F(",ram:"));
+            Serial.print(freeRam());
+            Serial.print(F(",min:"));
+            Serial.print(g_minFreeRam);
             Serial.println('}');
           }
-          // #endregion
           JsonProtocol::sendStats(g_parseStats);
         } else if (cmd.N >= 200) {
           // N=200+: Motion commands
@@ -259,14 +286,72 @@ void task_protocol_rx() {
 
 // Handle legacy ELEGOO commands (N=1-199)
 void handleLegacyCommand(const ParsedCommand& cmd) {
-  // Acknowledge all legacy commands (except some that have delayed response)
-  // This maintains compatibility with official ELEGOO behavior
+  wdt_reset();
+  
+  // Handle sensor commands with actual data
+  switch (cmd.N) {
+    case 21: {
+      // N=21: Ultrasonic sensor
+      // D1=1: Return obstacle detection (true/false)
+      // D1=2: Return distance in cm
+      uint16_t distance = ultrasonic.getDistance();
+      
+      if (cmd.D1 == 1) {
+        // Obstacle detection mode (within 20cm)
+        if (distance > 0 && distance <= 20) {
+          JsonProtocol::sendTrue(cmd.H);
+        } else {
+          JsonProtocol::sendFalse(cmd.H);
+        }
+      } else if (cmd.D1 == 2) {
+        // Distance mode - return actual cm value
+        char valueStr[8];
+        snprintf(valueStr, sizeof(valueStr), "%u", distance);
+        JsonProtocol::sendValue(cmd.H, valueStr);
+      } else {
+        JsonProtocol::sendOk(cmd.H);
+      }
+      return;
+    }
+    
+    case 22: {
+      // N=22: Line sensor (tracking module)
+      // D1=0: Left sensor value
+      // D1=1: Middle sensor value
+      // D1=2: Right sensor value
+      uint16_t value = 0;
+      
+      if (cmd.D1 == 0) {
+        value = lineSensor.readLeft();
+      } else if (cmd.D1 == 1) {
+        value = lineSensor.readMiddle();
+      } else if (cmd.D1 == 2) {
+        value = lineSensor.readRight();
+      }
+      
+      char valueStr[8];
+      snprintf(valueStr, sizeof(valueStr), "%u", value);
+      JsonProtocol::sendValue(cmd.H, valueStr);
+      return;
+    }
+    
+    case 23: {
+      // N=23: Battery voltage (ZIP extension)
+      // Returns voltage in millivolts
+      uint16_t voltage_mv = (uint16_t)(batteryMonitor.readVoltage() * 1000);
+      char valueStr[8];
+      snprintf(valueStr, sizeof(valueStr), "%u", voltage_mv);
+      JsonProtocol::sendValue(cmd.H, valueStr);
+      return;
+    }
+    
+    default:
+      break;
+  }
   
   // Commands 2 and 7 have delayed response in official firmware
   // (they respond after timer expires)
   if (cmd.N == 2 || cmd.N == 7) {
-    // Time-limited commands - don't respond immediately
-    // (official firmware responds after timer expires)
     return;
   }
   
@@ -394,6 +479,9 @@ void handleMotionCommand(const ParsedCommand& cmd) {
       // D2: intensity (0-255)
       // T: TTL (1000-10000ms)
       
+      // Probe RAM at macro transition
+      updateMinFreeRam();
+      
       // Stop any active setpoint
       motionController.stop();
       
@@ -439,38 +527,30 @@ void setup() {
   // NOTE: Using 115200 (not official 9600) for better motion control throughput
   Serial.begin(SERIAL_BAUD);
   
-  // Initialize hardware - incrementally enabling
+  // Initialize hardware
   motorDriver.init();
-  batteryMonitor.init();  // RE-ENABLED: Simple ADC, low RAM
-  servoPan.init();        // RE-ENABLED: Servo for pan
-  ultrasonic.init();      // RE-ENABLED: Distance sensor
-  lineSensor.init();      // RE-ENABLED: Line following sensor
-  modeButton.init();      // RE-ENABLED: Digital input
-  // DISABLED to save RAM:
-  // statusLED.init();  // FastLED is too heavy (uses too much RAM)
-  // imu.init();        // Wire library + IMU at 88% RAM causes resets
-  
-  // DISABLED to save RAM:
-  // commandHandler.init(&motorDriver, &servoPan, &statusLED);
+  batteryMonitor.init();
+  servoPan.init();  // Uses exact ELEGOO pattern with attach/delay/detach
+  ultrasonic.init();
+  lineSensor.init();
+  modeButton.init();
   
   // Initialize motion control system
   motionController.init(&motorDriver);
-  macroEngine.init(&motorDriver);  // RE-ENABLED
-  safetyLayer.init();  // RE-ENABLED
-  
-  // Self-test disabled
+  macroEngine.init(&motorDriver);
+  safetyLayer.init();
   
   // Initialize scheduler
   scheduler.init();
   
   // Register tasks
   scheduler.registerTask(task_control_loop, 1000 / TASK_CONTROL_LOOP_HZ, "ctrl");
-  scheduler.registerTask(task_sensors_fast, 1000 / TASK_SENSORS_FAST_HZ, "sens_f");  // RE-ENABLED
-  scheduler.registerTask(task_sensors_slow, 1000 / TASK_SENSORS_SLOW_HZ, "sens_s");  // RE-ENABLED
+  scheduler.registerTask(task_sensors_fast, 1000 / TASK_SENSORS_FAST_HZ, "sens_f");
+  scheduler.registerTask(task_sensors_slow, 1000 / TASK_SENSORS_SLOW_HZ, "sens_s");
   scheduler.registerTask(task_protocol_rx, 1, "rx");
   
-  // Initialize protocol decoder
-  protocolDecoder.reset();
+  // Protocol decoder removed - JSON only
+  // protocolDecoder.reset();
   
   // Enable watchdog (8 seconds)
   wdt_enable(WDTO_8S);

@@ -43,10 +43,17 @@
 #define MOTION_MACRO_TTL_MAX_MS 10000
 #define MOTION_RATE_LIMIT_HZ 50  // Max commands per second
 
-// Motor Control
-#define MOTOR_RAMP_RATE_MAX 5        // Maximum PWM change per control loop iteration
-#define MOTOR_PWM_DEADBAND 10        // Minimum PWM to overcome friction
+// Motor Control (Official ELEGOO parameters)
+// Note: Official ELEGOO code has NO ramping - PWM is applied immediately
+// Setting ramp rate to 255 effectively disables ramping for immediate response
+#define MOTOR_RAMP_RATE_MAX 255      // Disable ramping (official: instant PWM apply)
+#define MOTOR_PWM_DEADBAND 10        // Minimum PWM to overcome friction (official minimum)
 #define MOTOR_BRAKE_MODE true        // Use brake mode (vs coast)
+#define MOTOR_SPEED_ROCKER 250       // Official rocker/joystick default speed
+#define MOTOR_SPEED_TRACKING 100     // Official line tracking speed
+#define MOTOR_SPEED_OBSTACLE 150     // Official obstacle avoidance speed
+#define MOTOR_SPEED_FOLLOW 100       // Official following mode forward speed
+#define MOTOR_SPEED_TURN 150         // Official turning speed
 
 // Sensor Rates
 #define ULTRASONIC_MAX_RATE_HZ 10    // Maximum ultrasonic reads per second

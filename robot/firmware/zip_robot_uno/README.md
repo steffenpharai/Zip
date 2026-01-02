@@ -3,9 +3,13 @@
 Production-grade firmware for ELEGOO Smart Robot Car V4.0 on Arduino UNO.
 
 **Verified Configuration (January 2026)**
-- RAM: 83.9% (1719/2048 bytes)
-- Flash: 71.1% (22934/32256 bytes)
-- All motion tests passing (93/93)
+- RAM: 83.7% (1715/2048 bytes)
+- Flash: 71.9% (23190/32256 bytes)
+- All motion tests passing
+- Servo control: **Known Issue** - works at boot, fails on commands (RAM too high)
+- Sensor commands return actual values (N=21, N=22, N=23)
+
+⚠️ **Servo Issue**: N=5 commands fail at 83% RAM. Servo works at 46% RAM. See [Troubleshooting](#servo-doesnt-move).
 
 ---
 
@@ -170,9 +174,16 @@ Flash: [=======   ]  71.1% (used 22934 bytes from 32256 bytes)
 
 ## Testing
 
-### Test Script: `serial_motor_bringup.js`
+### Test Scripts
 
-A comprehensive Node.js test tool for verifying robot functionality.
+| Script | Language | Purpose |
+|--------|----------|---------|
+| `tools/serial_motor_bringup.js` | Node.js | Motor/motion tests |
+| `test_servo_rotation.py` | Python | Servo control tests |
+
+### Motor Test: `serial_motor_bringup.js`
+
+A comprehensive Node.js test tool for verifying motor functionality.
 
 #### Installation
 
@@ -193,6 +204,36 @@ node serial_motor_bringup.js COM5 --quick
 # Extended motion tests only (safe for desktop - 0.5ft radius)
 node serial_motor_bringup.js COM5 --motion-only
 ```
+
+### Servo Test: `test_servo_rotation.py`
+
+Python test script for verifying servo control via N=5 JSON protocol.
+
+#### Usage
+
+```bash
+cd robot/firmware/zip_robot_uno
+
+# Run full servo test suite
+python test_servo_rotation.py --port COM5 --all
+
+# Set servo to specific angle
+python test_servo_rotation.py --port COM5 --angle 90
+
+# Run sweep test only
+python test_servo_rotation.py --port COM5 --sweep
+
+# List available serial ports
+python test_servo_rotation.py --list-ports
+```
+
+#### Test Modes
+
+| Mode | Flag | Description |
+|------|------|-------------|
+| **All** | `--all` | Edge cases + sweep + rapid moves |
+| **Single** | `--angle 90` | Set to specific angle |
+| **Sweep** | `--sweep` | 0° → 180° → 0° sweep |
 
 #### Test Modes
 
@@ -277,6 +318,10 @@ Format: NDJSON (one JSON object per line)
 | N | Command | Parameters | Response | Description |
 |---|---------|------------|----------|-------------|
 | 0 | Hello | - | `{H_ok}` | Handshake/ping |
+| 5 | Servo | D1=angle | `{H_ok}` | Pan servo control (0-180°) |
+| 21 | Ultrasonic | D1=mode | `{H_<value>}` | Distance/obstacle sensor |
+| 22 | Line Sensor | D1=sensor | `{H_<value>}` | IR line sensor (L/M/R) |
+| 23 | Battery | - | `{H_<mV>}` | Battery voltage |
 | 120 | Diagnostics | - | `{<state>...}` | Debug state dump |
 | 200 | Setpoint | D1=v, D2=w, T=ttl | (none) | Streaming motion |
 | 201 | Stop | - | `{H_ok}` | Immediate stop |
@@ -284,15 +329,40 @@ Format: NDJSON (one JSON object per line)
 | 211 | Macro Cancel | - | `{H_ok}` | Cancel macro |
 | 999 | Direct Motor | D1=L, D2=R | `{H_ok}` | Raw PWM control |
 
+### Sensor Commands (N=21-23)
+
+These commands return actual sensor values in the response.
+
+| N | Command | Parameters | Response | Description |
+|---|---------|------------|----------|-------------|
+| 21 | Ultrasonic | D1=1 | `{H_true/false}` | Obstacle detection (≤20cm) |
+| 21 | Ultrasonic | D1=2 | `{H_<distance>}` | Distance in cm (0-400) |
+| 22 | Line Sensor | D1=0 | `{H_<value>}` | Left sensor (0-1023) |
+| 22 | Line Sensor | D1=1 | `{H_<value>}` | Middle sensor (0-1023) |
+| 22 | Line Sensor | D1=2 | `{H_<value>}` | Right sensor (0-1023) |
+| 23 | Battery | - | `{H_<voltage_mv>}` | Battery voltage in mV |
+
+**Examples:**
+```json
+// Ultrasonic distance
+{"N":21,"H":"ultra","D1":2}  →  {ultra_42}   // 42cm
+
+// Ultrasonic obstacle detection
+{"N":21,"H":"obs","D1":1}    →  {obs_false}  // No obstacle
+
+// Line sensor (middle)
+{"N":22,"H":"line1","D1":1}  →  {line1_512}  // Analog value
+
+// Battery voltage
+{"N":23,"H":"batt"}          →  {batt_7400}  // 7.4V
+```
+
 ### Legacy Commands (N=1-199)
 
-All legacy ELEGOO commands return `{H_ok}` for compatibility.
+Other legacy ELEGOO commands return `{H_ok}` for compatibility.
 
 | N | Command | Parameters | Description |
 |---|---------|------------|-------------|
-| 5 | Servo | D1=servo, D2=angle | Pan/tilt servo |
-| 21 | Ultrasonic | D1=mode | Distance read |
-| 22 | Line Sensor | D1=sensor | IR sensor read |
 | 100 | Clear Mode | - | Stop all |
 | 110 | Clear State | - | Reset state |
 
@@ -321,6 +391,30 @@ All legacy ELEGOO commands return `{H_ok}` for compatibility.
 - D2: Right motor PWM (-255 to 255, negative=reverse)
 - Bypasses all motion control, directly sets pins
 - Maintained by control loop until stopped
+
+### Servo Control (N=5)
+
+```json
+{"N":5,"H":"tag","D1":90}
+```
+
+- D1: Servo angle (0-180 degrees)
+- Controls the pan servo on pin 10
+- Uses official Elegoo pulse width calibration (500μs-2400μs)
+- Re-attaches servo before each write for reliability
+
+**Examples:**
+```json
+{"N":5,"D1":0}     // Pan full left
+{"N":5,"D1":90}    // Pan center
+{"N":5,"D1":180}   // Pan full right
+```
+
+**Test Script:**
+```bash
+# Run servo rotation test
+python test_servo_rotation.py --port COM5 --all
+```
 
 ### Setpoint Streaming (N=200)
 
@@ -352,17 +446,18 @@ All legacy ELEGOO commands return `{H_ok}` for compatibility.
 
 ### Sensors & Peripherals
 
-| Function | Pin | Arduino |
-|----------|-----|---------|
-| Servo Pan | D10 | 10 |
-| Ultrasonic Trig | D12 | 12 |
-| Ultrasonic Echo | D11 | 11 |
-| Line Sensor L | A0 | 14 |
-| Line Sensor M | A1 | 15 |
-| Line Sensor R | A2 | 16 |
-| Battery Monitor | A3 | 17 |
-| Mode Button | D2 | 2 |
-| RGB LED | D13 | 13 |
+| Function | Pin | Arduino | Notes |
+|----------|-----|---------|-------|
+| Servo Pan (Z) | D10 | 10 | Horizontal pan, 0-180° |
+| Servo Tilt (Y) | D11 | 11 | Vertical tilt (not impl.) |
+| Ultrasonic Trig | D13 | 13 | HC-SR04 |
+| Ultrasonic Echo | D12 | 12 | HC-SR04 |
+| Line Sensor L | A2 | 16 | ITR20001 |
+| Line Sensor M | A1 | 15 | ITR20001 |
+| Line Sensor R | A0 | 14 | ITR20001 |
+| Battery Monitor | A3 | 17 | Voltage divider |
+| Mode Button | D2 | 2 | Interrupt capable |
+| RGB LED | D4 | 4 | WS2812 (disabled) |
 
 ---
 
@@ -371,8 +466,11 @@ All legacy ELEGOO commands return `{H_ok}` for compatibility.
 ### Arduino UNO Limitations
 
 - **Total RAM**: 2048 bytes
-- **Safe Limit**: ~85% (1740 bytes)
-- **Current Usage**: 83.9% (1719 bytes)
+- **Safe Limit for basic commands**: ~85% (1740 bytes)
+- **Safe Limit for servo control**: ~75% (1536 bytes) - servo.attach() needs stack space
+- **Current Usage**: 83.7% (1715 bytes)
+
+⚠️ **CRITICAL**: Servo control requires RAM below 75% to work reliably. The `servo.attach()` function uses significant stack space and will corrupt memory if insufficient stack is available.
 
 ### What Uses RAM
 
@@ -442,9 +540,73 @@ All legacy ELEGOO commands return `{H_ok}` for compatibility.
 3. Check Node.js serialport installed
 4. Verify firmware is uploaded
 
+### Servo Doesn't Move
+
+**Quick Checks:**
+1. Verify servo signal wire connected to pin 10
+2. Check servo has 5V power (red wire)
+3. Check servo ground connected to Arduino GND
+4. Send test command: `{"N":5,"D1":90}`
+5. Run servo test: `python test_servo_rotation.py --port COM5 --angle 90`
+
+**If servo moves on boot but not on commands - RAM/Stack Issue:**
+
+The servo control uses the exact ELEGOO pattern which requires significant stack space:
+```cpp
+servo.attach(PIN_SERVO_Z);   // Attach before write
+servo.write(angle);          // Set position
+delay(450);                  // Wait for movement
+servo.detach();              // Release Timer1
+```
+
+When RAM usage is too high (>80%), there's insufficient stack space for `servo.attach()` which corrupts the Servo library's internal data structures.
+
+**Symptoms of stack overflow:**
+- Servo moves to center on boot (init works) but not on commands
+- `servo.attached()` returns false even after calling `attach()`
+- `servo.read()` returns garbage values like -34
+
+**Solutions:**
+1. Reduce RAM usage to below 75% (gives ~500+ bytes for stack)
+2. Disable non-essential subsystems (IMU, FastLED already disabled)
+3. Reduce buffer sizes in frame parser or JSON documents
+4. Move servo control earlier in the call chain (reduce stack depth)
+
+**Verify the issue:**
+```bash
+# Test at minimal RAM (should work)
+# Disable most subsystems, keep only servo + motor + JSON parser
+
+# Check RAM after build:
+pio run -v | grep RAM
+# Should be below 75% for servo to work reliably
+```
+
 ---
 
 ## Version History
+
+### v2.3.0 (January 2026) - Current
+- **Servo control uses exact ELEGOO pattern**: attach → write → delay(450) → detach
+- **Known Issue**: Servo commands fail at 83% RAM due to stack overflow
+  - Servo works during boot (init) but not on N=5 commands
+  - Root cause: `servo.attach()` needs stack space, overflows at high RAM
+  - Works at 46% RAM, fails at 83% RAM
+  - **Fix needed**: Reduce RAM usage to below 75%
+
+### v2.2.0 (January 2026)
+- **Sensor commands now return actual values** (matching official ELEGOO protocol)
+- N=21: Ultrasonic returns distance in cm or obstacle detection status
+- N=22: Line sensors return analog values (0-1023)
+- N=23: Battery voltage command added (returns mV)
+- Updated test scripts to validate sensor values
+
+### v2.1.0 (January 2026)
+- **Added N=5 servo control** via JSON protocol
+- Fixed servo HAL to match official Elegoo pattern (re-attach before write)
+- Added pulse width calibration (500μs-2400μs)
+- New `test_servo_rotation.py` test script
+- RAM reduced to 82.7% (from 83.9%)
 
 ### v2.0.0 (January 2026)
 - Complete motion control refactor

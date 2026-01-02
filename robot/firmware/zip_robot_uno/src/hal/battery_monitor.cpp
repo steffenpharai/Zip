@@ -52,11 +52,12 @@ void BatteryMonitor::update() {
 }
 
 float BatteryMonitor::adcToVoltage(uint16_t adc) {
-  // ADC reading (0-1023) to voltage
-  // Assuming voltage divider if present, otherwise direct reading
-  float adcVoltage = adc * BATTERY_ADC_SCALE;
-  
-  // Apply divider ratio if used
-  return adcVoltage * BATTERY_DIVIDER_RATIO;
+  // Official ELEGOO formula from DeviceDriverSet_xxx0.cpp:
+  // float Voltage = (analogRead(PIN_Voltage) * 0.0375);
+  // Voltage = Voltage + (Voltage * 0.08); // Compensation 8%
+  // This equals: adc * 0.0375 * 1.08 = adc * 0.0405
+  float voltage = adc * 0.0375f;
+  voltage = voltage + (voltage * 0.08f);  // 8% compensation per official code
+  return voltage;
 }
 

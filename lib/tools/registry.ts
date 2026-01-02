@@ -18,6 +18,16 @@ import { docAnswer, docAnswerSchema, docAnswerOutputSchema } from "./implementat
 import { getPrinterStatus, getPrinterStatusSchema, getPrinterStatusOutputSchema, getPrinterTemperature, getPrinterTemperatureSchema, getPrinterTemperatureOutputSchema, getPrintProgress, getPrintProgressSchema, getPrintProgressOutputSchema, listPrinterFiles, listPrinterFilesSchema, listPrinterFilesOutputSchema } from "./implementations/printer/status";
 import { startPrint, startPrintSchema, startPrintOutputSchema, pausePrint, pausePrintSchema, pausePrintOutputSchema, resumePrint, resumePrintSchema, resumePrintOutputSchema, cancelPrint, cancelPrintSchema, cancelPrintOutputSchema, setTemperature, setTemperatureSchema, setTemperatureOutputSchema, homeAxes, homeAxesSchema, homeAxesOutputSchema, moveAxis, moveAxisSchema, moveAxisOutputSchema } from "./implementations/printer/control";
 import { uploadGcodeFile, uploadGcodeFileSchema, uploadGcodeFileOutputSchema } from "./implementations/printer/upload";
+import {
+  getRobotStatus, getRobotStatusSchema, getRobotStatusOutputSchema,
+  getRobotDiagnostics, getRobotDiagnosticsSchema, getRobotDiagnosticsOutputSchema,
+  robotMove, robotMoveSchema, robotMoveOutputSchema,
+  robotStop, robotStopSchema, robotStopOutputSchema,
+  robotStreamStart, robotStreamStartSchema, robotStreamStartOutputSchema,
+  robotStreamStop, robotStreamStopSchema, robotStreamStopOutputSchema,
+  getRobotSensors, getRobotSensorsSchema, getRobotSensorsOutputSchema,
+} from "./implementations/robot";
+// Old GPIO, register, and feature flag tools removed - not part of new binary protocol
 
 // Use server version for API routes, client version for direct calls
 // Always use server version since tools are called from API routes
@@ -402,6 +412,75 @@ toolRegistry.set("upload_gcode_file", {
   outputSchema: uploadGcodeFileOutputSchema,
   permissionTier: "ACT",
   execute: (input: unknown) => uploadGcodeFile(input as z.infer<typeof uploadGcodeFileSchema>),
+});
+
+// ============================================================================
+// Robot Tools
+// ============================================================================
+
+// Robot Status Tools (READ tier)
+toolRegistry.set("get_robot_status", {
+  name: "get_robot_status",
+  description: "Get robot connection status, bridge state, and streaming status",
+  inputSchema: getRobotStatusSchema,
+  outputSchema: getRobotStatusOutputSchema,
+  permissionTier: "READ",
+  execute: (input: unknown) => getRobotStatus(input as z.infer<typeof getRobotStatusSchema>),
+});
+
+toolRegistry.set("get_robot_diagnostics", {
+  name: "get_robot_diagnostics",
+  description: "Get robot firmware diagnostics including motor states, reset count, and serial statistics",
+  inputSchema: getRobotDiagnosticsSchema,
+  outputSchema: getRobotDiagnosticsOutputSchema,
+  permissionTier: "READ",
+  execute: (input: unknown) => getRobotDiagnostics(input as z.infer<typeof getRobotDiagnosticsSchema>),
+});
+
+toolRegistry.set("get_robot_sensors", {
+  name: "get_robot_sensors",
+  description: "Get robot sensor readings including ultrasonic distance, line sensors, and battery voltage",
+  inputSchema: getRobotSensorsSchema,
+  outputSchema: getRobotSensorsOutputSchema,
+  permissionTier: "READ",
+  execute: (input: unknown) => getRobotSensors(input as z.infer<typeof getRobotSensorsSchema>),
+});
+
+// Robot Motion Tools (ACT tier - require confirmation)
+toolRegistry.set("robot_move", {
+  name: "robot_move",
+  description: "Move the robot with specified velocity and turn rate. Positive velocity = forward, negative = backward. Positive turn rate = turn right, negative = turn left. Requires user confirmation.",
+  inputSchema: robotMoveSchema,
+  outputSchema: robotMoveOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => robotMove(input as z.infer<typeof robotMoveSchema>),
+});
+
+toolRegistry.set("robot_stop", {
+  name: "robot_stop",
+  description: "Immediately stop the robot. Emergency stop command that halts all motor movement. Requires user confirmation.",
+  inputSchema: robotStopSchema,
+  outputSchema: robotStopOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => robotStop(input as z.infer<typeof robotStopSchema>),
+});
+
+toolRegistry.set("robot_stream_start", {
+  name: "robot_stream_start",
+  description: "Start continuous motion streaming to the robot. Streams setpoints at specified rate (default 10Hz) with TTL safety. Requires user confirmation.",
+  inputSchema: robotStreamStartSchema,
+  outputSchema: robotStreamStartOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => robotStreamStart(input as z.infer<typeof robotStreamStartSchema>),
+});
+
+toolRegistry.set("robot_stream_stop", {
+  name: "robot_stream_stop",
+  description: "Stop motion streaming to the robot. Can optionally send a hard stop command. Requires user confirmation.",
+  inputSchema: robotStreamStopSchema,
+  outputSchema: robotStreamStopOutputSchema,
+  permissionTier: "ACT",
+  execute: (input: unknown) => robotStreamStop(input as z.infer<typeof robotStreamStopSchema>),
 });
 
 export function getTool(name: string): ToolDefinition | undefined {

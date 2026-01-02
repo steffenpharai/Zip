@@ -4,8 +4,11 @@
 
 #include "motion_controller.h"
 
-const float MotionController::DIFF_MIX_K = 1.0f;  // Can be tuned
-const int16_t MotionController::SLEW_LIMIT = 5;   // Max PWM change per update
+// Official ELEGOO differential mixing constant
+const float MotionController::DIFF_MIX_K = 1.0f;  // k in left = v - k*w, right = v + k*w
+// Official ELEGOO has NO slew limiting - PWM applied immediately
+// Setting to 255 effectively disables slew limiting for immediate response
+const int16_t MotionController::SLEW_LIMIT = 255; // Disabled (official: instant PWM)
 
 MotionController::MotionController()
   : motorDriver(nullptr)

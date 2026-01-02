@@ -16,10 +16,12 @@ ZIP is a production-grade Jarvis-style HUD assistant with:
 
 - **Realtime Voice**: OpenAI Realtime WebRTC integration
 - **AI Brain**: Intelligent orchestration system
-- **Tool Ecosystem**: 20+ tools with permission-based access
+- **Tool Ecosystem**: 39 tools with permission-based access (including printer and robot control)
 - **Event-Driven**: Typed event bus for all state changes
 - **Type-Safe**: Full TypeScript with Zod validation
 - **Production-Ready**: Error handling, logging, tracing, rate limiting
+- **Robot Control**: ELEGOO Smart Robot Car V4.0 integration via bridge server
+- **3D Printer**: Moonraker/Klipper printer integration
 
 ## Project Structure
 
@@ -29,15 +31,21 @@ zip/
 │   ├── api/               # API routes
 │   └── (hud)/            # HUD page
 ├── components/            # React components
-│   └── hud/              # HUD-specific components
+│   ├── hud/              # HUD-specific components
+│   └── robot/            # Robot control UI components
 ├── hooks/                 # React hooks
 ├── lib/                   # Core libraries
 │   ├── events/           # Event bus system
 │   ├── orchestrators/    # AI Brain orchestration
 │   ├── tools/            # Tool registry and executor
+│   ├── robot/            # Robot client integration
 │   ├── memory/           # Memory management
 │   ├── observability/    # Tracing and audit
 │   └── openai/           # OpenAI integration
+├── robot/                # Robot integration
+│   ├── bridge/           # Robot bridge server
+│   ├── firmware/         # Arduino firmware
+│   └── tools/            # Testing utilities
 ├── scripts/              # Utility scripts
 └── data/                 # Runtime data (auto-created)
 ```

@@ -180,11 +180,11 @@ Each tool in its own file:
 ### Permission Tiers
 
 - **READ**: Safe read-only operations
-  - Examples: `get_system_stats`, `get_weather`, `web_search`
+  - Examples: `get_system_stats`, `get_weather`, `web_search`, `get_robot_status`, `get_printer_status`
 - **WRITE**: Data modification operations
   - Examples: `create_note`, `ingest_document`
 - **ACT**: Actions requiring user confirmation
-  - Examples: `open_url`, `create_timer`, `set_camera_enabled`
+  - Examples: `open_url`, `create_timer`, `set_camera_enabled`, `robot_move`, `start_print`
   - MUST request confirmation via chat
 - **ADMIN**: Administrative operations (not implemented yet)
 

@@ -13,7 +13,9 @@ ZIP is a production-grade, state-of-the-art (2026) Jarvis-style HUD assistant bu
 - **Memory System**: User-controlled pinned memory with natural language commands
 - **Document Intelligence**: PDF ingestion, vector search, and Q&A
 - **Web Research**: Automated research pipeline with source validation
-- **Comprehensive Tool Ecosystem**: 20+ tools with permission-based access
+- **3D Printer Control**: Full Moonraker/Klipper integration (11 tools)
+- **Robot Control**: ELEGOO Smart Robot Car V4.0 integration (7 tools)
+- **Comprehensive Tool Ecosystem**: 39 tools with permission-based access
 
 ## Architecture Overview
 
@@ -82,11 +84,11 @@ All tools MUST be registered with:
 ### Permission Tiers
 
 - **READ**: Safe read-only operations
-  - Examples: `get_system_stats`, `get_weather`, `web_search`
+  - Examples: `get_system_stats`, `get_weather`, `web_search`, `get_robot_status`, `get_printer_status`
 - **WRITE**: Data modification operations
   - Examples: `create_note`, `ingest_document`
 - **ACT**: Actions requiring user confirmation
-  - Examples: `open_url`, `create_timer`, `set_camera_enabled`
+  - Examples: `open_url`, `create_timer`, `set_camera_enabled`, `robot_move`, `start_print`
   - MUST request confirmation via chat before execution
 - **ADMIN**: Administrative operations (not implemented yet)
 
@@ -130,6 +132,7 @@ app/                    # Next.js app directory
   api/                  # API routes (one route per file)
 components/             # React components
   hud/                  # HUD-specific components
+  robot/                # Robot control UI components
 hooks/                  # React hooks (use* prefix)
 lib/                    # Core libraries
   events/               # Event bus system
@@ -140,12 +143,16 @@ lib/                    # Core libraries
     brain.ts            # Main orchestration graph
     nodes/              # Orchestration nodes
     utils/              # Utilities (context-filter, etc.)
+  robot/                # Robot client integration
   tools/                # Tool registry and executor
     registry.ts         # Tool registry
     executor.ts         # Tool executor
-    implementations/    # Tool implementations
+    implementations/    # Tool implementations (includes robot/, printer/)
   voice/                # Voice system
   utils/                # Utility functions
+robot/                  # Robot integration (standalone)
+  bridge/               # Robot bridge server
+  firmware/             # Arduino/PlatformIO firmware
 scripts/                # Utility scripts (npx tsx scripts/...)
 data/                   # Runtime data (auto-created)
 ```

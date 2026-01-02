@@ -1,6 +1,6 @@
 import { ZIP_MODES, type ZipMode } from "@/lib/constants";
 
-export type PanelType = "system" | "weather" | "camera" | "uptime" | "printer" | "printer_error";
+export type PanelType = "system" | "weather" | "camera" | "uptime" | "printer" | "printer_error" | "robot" | "robot_error";
 
 // Tool card payload types
 export type VisionToolCardPayload = {
@@ -35,11 +35,32 @@ export type UrlToolCardPayload = {
   action: "open";
 };
 
+export type RobotToolCardPayload = {
+  type: "robot";
+  action: "move" | "stop" | "stream_start" | "stream_stop" | "sensors" | "diagnostics";
+  success: boolean;
+  data?: {
+    velocity?: number;
+    turnRate?: number;
+    motorLeft?: number;
+    motorRight?: number;
+    streaming?: boolean;
+    sensors?: {
+      ultrasonic?: number | null;
+      lineSensor?: { left: number; middle: number; right: number };
+      battery?: { voltage: number; percent: number };
+    };
+  };
+  message?: string;
+  error?: string;
+};
+
 export type ToolCardPayload =
   | VisionToolCardPayload
   | ResearchToolCardPayload
   | DocumentToolCardPayload
   | UrlToolCardPayload
+  | RobotToolCardPayload
   | { type: string; [key: string]: unknown };
 
 export type BrainActivityEvent = {

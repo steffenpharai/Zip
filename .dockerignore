@@ -16,11 +16,13 @@ coverage
 .nyc_output
 test-results
 playwright-report
+test-results
 
 # Environment files
 .env
 .env*.local
 .env.production
+.env.development
 
 # IDE
 .vscode
@@ -53,8 +55,28 @@ artifacts
 *.tsbuildinfo
 next-env.d.ts
 
-# Misc
-*.pem
+# Services (exclude large service directories)
+services/zip-avatar-server
+services/**/venv
+services/**/__pycache__
+services/**/*.pyc
+
+# Robot firmware (not needed in containers)
+robot/ELEGOO Smart Robot Car Kit V4.0 2023.02.01
+robot/firmware
+robot/bridge/zip-robot-bridge/node_modules
+robot/bridge/zip-robot-bridge/dist
+
+# Development tools
 .cursor
 plans
+*.plan.md
+
+# Documentation (optional, can be included if needed)
+# docs
+
+# Misc
+*.pem
+*.md
+!README.md
 

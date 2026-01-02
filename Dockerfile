@@ -6,7 +6,8 @@ RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    sqlite
+    sqlite \
+    git
 
 # Accept build arguments for environment variables
 ARG OPENAI_API_KEY
@@ -31,13 +32,15 @@ ENV ZIP_VOICE_FALLBACK_ENABLED=${ZIP_VOICE_FALLBACK_ENABLED}
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better layer caching
 COPY package*.json ./
 
 # Install dependencies (use legacy-peer-deps for React Three Fiber compatibility)
-RUN npm ci --legacy-peer-deps
+# Use npm ci for reproducible builds and clean cache
+RUN npm ci --legacy-peer-deps && \
+    npm cache clean --force
 
-# Copy source code
+# Copy source code (this layer will invalidate on code changes)
 COPY . .
 
 # Build Next.js application (requires API key from build args)
@@ -46,9 +49,10 @@ RUN npm run build
 # Production stage
 FROM node:20-alpine AS runner
 
-# Install runtime dependencies
+# Install runtime dependencies (wget for health checks)
 RUN apk add --no-cache \
     sqlite \
+    wget \
     && rm -rf /var/cache/apk/*
 
 # Set working directory
@@ -93,6 +97,7 @@ RUN npm ci --only=production --legacy-peer-deps && \
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder --chown=nextjs:nodejs /app/next.config.js ./next.config.js
 COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 # Create data directory for SQLite databases and logs
 RUN mkdir -p /app/data && \
@@ -106,6 +111,10 @@ EXPOSE 3000
 
 # Set port environment variable
 ENV PORT=3000
+
+# Health check
+HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=5 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 # Run production server
 CMD ["npm", "run", "start"]

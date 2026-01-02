@@ -17,9 +17,11 @@ ZIP is a production-grade Jarvis-style HUD assistant with:
 
 - **Realtime Voice**: OpenAI Realtime WebRTC integration
 - **AI Brain**: Intelligent orchestration system
-- **Tool Ecosystem**: 20+ tools with permission-based access
+- **Tool Ecosystem**: 39 tools with permission-based access (including printer and robot control)
 - **Event-Driven**: Typed event bus for all state changes
 - **Type-Safe**: Full TypeScript with Zod validation
+- **Robot Control**: ELEGOO Smart Robot Car V4.0 integration
+- **3D Printer**: Moonraker/Klipper printer integration
 
 ## Core Principles
 

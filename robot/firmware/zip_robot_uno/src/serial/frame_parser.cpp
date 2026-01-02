@@ -7,11 +7,16 @@
  * - Binary protocol detection (0xAA 0x55)
  * - Resync on long lines
  * - Diagnostic counters
+ * 
+ * Uses lightweight fixed-field scanner instead of ArduinoJson.
+ * ELEGOO protocol has fixed fields (N, H, D1, D2, D3, D4, T)
+ * so we don't need a general-purpose JSON parser.
+ * Saves ~96 bytes stack per parse + ArduinoJson library overhead.
  */
 
 #include "frame_parser.h"
-#include <ArduinoJson.h>
 #include <avr/wdt.h>
+#include <stdlib.h>  // for atoi, atol
 
 // Global diagnostic counters
 ParseStats g_parseStats = {0, 0, 0, 0, 0, 0};
@@ -21,7 +26,6 @@ FrameParser::FrameParser()
   , tail(0)
   , jsonPos(0)
   , state(STATE_IDLE)
-  , isBinary(false)
 {
   reset();
 }
@@ -30,7 +34,6 @@ void FrameParser::reset() {
   state = STATE_IDLE;
   jsonPos = 0;
   jsonBuffer[0] = '\0';
-  isBinary = false;
   lastCommand.valid = false;
   lastCommand.N = -1;
   lastCommand.H[0] = '\0';
@@ -89,24 +92,16 @@ void FrameParser::resyncToNewline() {
 }
 
 bool FrameParser::processByte(uint8_t byte) {
-  // Handle state machine
+  // Handle state machine - JSON only (binary protocol removed)
   switch (state) {
     case STATE_IDLE:
-      // Look for frame start
+      // Look for JSON frame start
       if (byte == '{') {
-        // JSON frame start
         jsonBuffer[0] = '{';
         jsonPos = 1;
         state = STATE_JSON_READING;
-        isBinary = false;
-      } else if (byte == 0xAA) {
-        // Potential binary protocol start
-        // Let caller handle binary via protocol decoder
-        isBinary = true;
-        state = STATE_BINARY_HEADER;
-        return false;  // Caller should use binary decoder
       }
-      // Ignore other characters (whitespace, newlines between frames)
+      // Ignore other characters (whitespace, newlines, binary bytes)
       return false;
       
     case STATE_JSON_READING:
@@ -127,11 +122,8 @@ bool FrameParser::processByte(uint8_t byte) {
         }
       } else if (byte == '\n' || byte == '\r') {
         // Newline before '}' - treat as frame terminator for compatibility
-        // Some hosts may send newline-terminated JSON
         if (jsonPos > 1) {
-          // Try to parse what we have if it looks complete
           jsonBuffer[jsonPos] = '\0';
-          // Check if last char is '}' (might have been missed)
           if (jsonPos > 0 && jsonBuffer[jsonPos - 1] == '}') {
             state = STATE_JSON_COMPLETE;
             return parseJson();
@@ -145,7 +137,6 @@ bool FrameParser::processByte(uint8_t byte) {
         // New frame start in middle of old frame - discard old and start fresh
         jsonBuffer[0] = '{';
         jsonPos = 1;
-        // Stay in reading state
         return false;
       } else {
         // Accumulate character
@@ -156,16 +147,9 @@ bool FrameParser::processByte(uint8_t byte) {
           g_parseStats.json_dropped_long++;
           state = STATE_IDLE;
           jsonPos = 0;
-          // Consume until newline to resync
           return false;
         }
       }
-      return false;
-      
-    case STATE_BINARY_HEADER:
-      // Binary protocol - return immediately so caller uses binary decoder
-      isBinary = true;
-      state = STATE_IDLE;
       return false;
       
     case STATE_JSON_COMPLETE:
@@ -178,52 +162,105 @@ bool FrameParser::processByte(uint8_t byte) {
   return false;
 }
 
+// Lightweight fixed-field scanner - replaces ArduinoJson
+// Scans for known field patterns in ELEGOO JSON format
+// Saves 96+ bytes stack vs StaticJsonDocument<96>
+//
+// Supported format: {"N":200,"H":"abc","D1":100,"D2":-50,"T":200}
+// Fields: N (required int), H (optional string), D1-D4 (optional int), T (optional ulong)
+
+// Find field value start position after "fieldName":
+// Returns pointer to value start, or nullptr if not found
+static const char* findField(const char* json, const char* fieldName) {
+  const char* p = json;
+  size_t fnLen = strlen(fieldName);
+  
+  while (*p) {
+    // Look for "fieldName"
+    if (*p == '"') {
+      if (strncmp(p + 1, fieldName, fnLen) == 0 && p[fnLen + 1] == '"') {
+        // Found field name, skip to colon then value
+        p += fnLen + 2;  // Skip past "fieldName"
+        while (*p && (*p == ':' || *p == ' ')) p++;  // Skip : and spaces
+        return p;
+      }
+    }
+    p++;
+  }
+  return nullptr;
+}
+
+// Parse integer value at position (handles negative)
+static int parseIntAt(const char* p) {
+  if (!p) return 0;
+  return atoi(p);
+}
+
+// Parse unsigned long value at position
+static unsigned long parseULongAt(const char* p) {
+  if (!p) return 0;
+  return atol(p);
+}
+
+// Extract quoted string value into buffer (max bufLen-1 chars)
+static void parseStringAt(const char* p, char* buf, size_t bufLen) {
+  buf[0] = '\0';
+  if (!p || *p != '"') return;
+  
+  p++;  // Skip opening quote
+  size_t i = 0;
+  while (*p && *p != '"' && i < bufLen - 1) {
+    buf[i++] = *p++;
+  }
+  buf[i] = '\0';
+}
+
 bool FrameParser::parseJson() {
   // Reset watchdog before parsing
   wdt_reset();
   
-  // Use minimal StaticJsonDocument (commands are simple)
-  // Typical command: {"N":200,"H":"cmd","D1":100,"D2":50,"T":200}
-  // ~50 bytes, so 96 byte document is sufficient
-  StaticJsonDocument<96> doc;
-  DeserializationError error = deserializeJson(doc, jsonBuffer);
+  // Initialize defaults
+  lastCommand.N = -1;
+  lastCommand.H[0] = '\0';
+  lastCommand.D1 = 0;
+  lastCommand.D2 = 0;
+  lastCommand.D3 = 0;
+  lastCommand.D4 = 0;
+  lastCommand.T = 0;
+  lastCommand.valid = false;
   
-  if (error) {
+  // N is required
+  const char* nPos = findField(jsonBuffer, "N");
+  if (!nPos) {
     g_parseStats.parse_errors++;
     state = STATE_IDLE;
     jsonPos = 0;
     return false;
   }
+  lastCommand.N = parseIntAt(nPos);
   
-  // Extract command fields
-  if (!doc.containsKey(F("N"))) {
-    g_parseStats.parse_errors++;
-    state = STATE_IDLE;
-    jsonPos = 0;
-    return false;
+  // H is optional string
+  const char* hPos = findField(jsonBuffer, "H");
+  if (hPos) {
+    parseStringAt(hPos, lastCommand.H, sizeof(lastCommand.H));
   }
   
-  lastCommand.N = doc[F("N")].as<int>();
+  // D1-D4 are optional integers
+  const char* d1Pos = findField(jsonBuffer, "D1");
+  if (d1Pos) lastCommand.D1 = parseIntAt(d1Pos);
   
-  // Extract H (header/serial number)
-  if (doc.containsKey(F("H"))) {
-    const char* h = doc[F("H")].as<const char*>();
-    if (h) {
-      strncpy(lastCommand.H, h, sizeof(lastCommand.H) - 1);
-      lastCommand.H[sizeof(lastCommand.H) - 1] = '\0';
-    } else {
-      lastCommand.H[0] = '\0';
-    }
-  } else {
-    lastCommand.H[0] = '\0';
-  }
+  const char* d2Pos = findField(jsonBuffer, "D2");
+  if (d2Pos) lastCommand.D2 = parseIntAt(d2Pos);
   
-  // Extract data fields (default to 0)
-  lastCommand.D1 = doc.containsKey(F("D1")) ? doc[F("D1")].as<int>() : 0;
-  lastCommand.D2 = doc.containsKey(F("D2")) ? doc[F("D2")].as<int>() : 0;
-  lastCommand.D3 = doc.containsKey(F("D3")) ? doc[F("D3")].as<int>() : 0;
-  lastCommand.D4 = doc.containsKey(F("D4")) ? doc[F("D4")].as<int>() : 0;
-  lastCommand.T = doc.containsKey(F("T")) ? doc[F("T")].as<unsigned long>() : 0;
+  const char* d3Pos = findField(jsonBuffer, "D3");
+  if (d3Pos) lastCommand.D3 = parseIntAt(d3Pos);
+  
+  const char* d4Pos = findField(jsonBuffer, "D4");
+  if (d4Pos) lastCommand.D4 = parseIntAt(d4Pos);
+  
+  // T is optional unsigned long
+  const char* tPos = findField(jsonBuffer, "T");
+  if (tPos) lastCommand.T = parseULongAt(tPos);
   
   lastCommand.valid = (lastCommand.N >= 0);
   

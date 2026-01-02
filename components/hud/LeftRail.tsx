@@ -6,6 +6,7 @@ import SystemStatsPanel from "./panels/SystemStatsPanel";
 import WeatherPanel from "./panels/WeatherPanel";
 import CameraPanel from "./panels/CameraPanel";
 import PrinterPanel from "./panels/PrinterPanel";
+import RobotPanel from "./panels/RobotPanel";
 
 export default function LeftRail() {
   const { isProjectorMode } = useProjector();
@@ -20,6 +21,7 @@ export default function LeftRail() {
         <SystemStatsPanel />
         <WeatherPanel />
         <CameraPanel />
+        <RobotPanel />
       </div>
       <div className="flex-1 min-h-0 mt-3">
         <PrinterPanel />

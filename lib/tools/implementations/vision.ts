@@ -5,12 +5,25 @@
 import { z } from "zod";
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy initialization to avoid errors when API key is not set during module load
+let openai: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!openai) {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error("OPENAI_API_KEY not configured");
+    }
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openai;
+}
 
 export const analyzeImageSchema = z.object({
-  imageBase64: z.string().describe("Base64-encoded image data (with data URL prefix)"),
+  imageBase64: z.string().optional().describe("Base64-encoded image data (with data URL prefix)"),
+  imageUrl: z.string().optional().describe("URL to image (for web images)"),
+  source: z.enum(["webcam", "upload"]).optional().default("webcam").describe("Image source"),
   prompt: z.string().optional().describe("Optional prompt for specific analysis"),
 });
 
@@ -29,17 +42,29 @@ export async function analyzeImage(input: z.infer<typeof analyzeImageSchema>): P
     throw new Error("OPENAI_API_KEY not configured");
   }
   
-  // Extract base64 data from data URL if present
-  let imageData = input.imageBase64;
-  if (imageData.startsWith("data:image")) {
-    imageData = imageData.split(",")[1] || imageData;
+  let imageUrl: string;
+  
+  // Handle different image sources
+  if (input.imageUrl) {
+    // Use provided URL
+    imageUrl = input.imageUrl;
+  } else if (input.imageBase64) {
+    // Use base64 data
+    let imageData = input.imageBase64;
+    if (imageData.startsWith("data:image")) {
+      imageData = imageData.split(",")[1] || imageData;
+    }
+    imageUrl = `data:image/jpeg;base64,${imageData}`;
+  } else {
+    throw new Error("No image data provided. Provide imageBase64 or imageUrl.");
   }
   
   const model = process.env.OPENAI_VISION_MODEL || "gpt-4o";
   
   const prompt = input.prompt || "Analyze this image and describe what you see. Identify any objects, text, or notable features.";
   
-  const response = await openai.chat.completions.create({
+  const client = getOpenAIClient();
+  const response = await client.chat.completions.create({
     model,
     messages: [
       {
@@ -52,7 +77,7 @@ export async function analyzeImage(input: z.infer<typeof analyzeImageSchema>): P
           {
             type: "image_url",
             image_url: {
-              url: `data:image/jpeg;base64,${imageData}`,
+              url: imageUrl,
             },
           },
         ],
@@ -73,6 +98,7 @@ export async function analyzeImage(input: z.infer<typeof analyzeImageSchema>): P
     analysis,
     objects: objects.length > 0 ? objects : undefined,
     text,
+    imageUrl: input.imageUrl,
   };
 }
 

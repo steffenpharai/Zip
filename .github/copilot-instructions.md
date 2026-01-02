@@ -4,7 +4,7 @@ This document provides specific instructions for GitHub Copilot Agent when worki
 
 ## Project Overview
 
-ZIP is a production-grade, state-of-the-art (2026) Jarvis-style HUD assistant built with Next.js, TypeScript, and Tailwind CSS. It features an advanced orchestration system, comprehensive tool ecosystem, and event-driven architecture.
+ZIP is a production-grade, state-of-the-art (2026) Jarvis-style HUD assistant built with Next.js, TypeScript, and Tailwind CSS. It features an advanced orchestration system, comprehensive tool ecosystem (39 tools), and event-driven architecture. The project includes integrations for ELEGOO Smart Robot Car V4.0 control and Moonraker/Klipper 3D printer management.
 
 ## Core Architecture Principles
 
@@ -57,9 +57,9 @@ Tool implementations go in `lib/tools/implementations/`
 
 ### 5. Permission Tiers
 
-- **READ**: Safe read-only operations (system stats, weather, web search)
+- **READ**: Safe read-only operations (system stats, weather, web search, robot sensors, printer status)
 - **WRITE**: Data modification (notes, documents)
-- **ACT**: Actions requiring user confirmation (open URL, create timer, camera)
+- **ACT**: Actions requiring user confirmation (open URL, create timer, camera, robot motion, printer control)
 - **ADMIN**: Administrative operations (not implemented yet)
 - ACT-tier tools MUST request confirmation via chat before execution
 
@@ -72,6 +72,7 @@ app/                    # Next.js app directory
   api/                  # API routes (one route per file)
 components/             # React components
   hud/                  # HUD-specific components
+  robot/                # Robot control UI components
 hooks/                  # React hooks (use* prefix)
 lib/                    # Core libraries
   events/               # Event bus system
@@ -82,12 +83,16 @@ lib/                    # Core libraries
     brain.ts            # Main orchestration graph
     nodes/              # Orchestration nodes
     utils/              # Utilities (context-filter, etc.)
+  robot/                # Robot client integration
   tools/                # Tool registry and executor
     registry.ts         # Tool registry
     executor.ts         # Tool executor
-    implementations/    # Tool implementations
+    implementations/    # Tool implementations (includes robot/, printer/)
   voice/                # Voice system
   utils/                # Utility functions
+robot/                  # Robot integration (standalone)
+  bridge/               # Robot bridge server (WebSocket to serial)
+  firmware/             # Arduino/PlatformIO firmware
 scripts/                # Utility scripts (npx tsx scripts/...)
 data/                   # Runtime data (auto-created)
 ```

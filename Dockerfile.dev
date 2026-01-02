@@ -2,11 +2,17 @@
 FROM node:20-alpine
 
 # Install build dependencies for native modules (better-sqlite3)
+# Also install development tools for debugging
 RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    sqlite
+    sqlite \
+    git \
+    curl \
+    wget \
+    vim \
+    bash
 
 # Accept build arguments for environment variables
 ARG OPENAI_API_KEY
@@ -36,14 +42,24 @@ ENV WATCHPACK_POLLING=true
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better layer caching
 COPY package*.json ./
 
 # Install dependencies (use legacy-peer-deps for React Three Fiber compatibility)
-RUN npm ci --legacy-peer-deps
+# Use npm ci for reproducible builds
+RUN npm ci --legacy-peer-deps && \
+    npm cache clean --force
+
+# Create data directory
+RUN mkdir -p /app/data && \
+    chmod 755 /app/data
 
 # Expose port
 EXPOSE 3000
+
+# Health check script (optional, can be overridden)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 # Run development server with hot reloading
 CMD ["npm", "run", "dev"]

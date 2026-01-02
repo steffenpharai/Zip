@@ -99,11 +99,10 @@ void JsonProtocol::sendStats(const ParseStats& stats) {
   uint32_t ms_ago = (stats.last_cmd_ms > 0) ? (now - stats.last_cmd_ms) : 0;
   
   snprintf(buffer, sizeof(buffer), 
-    "{stats:rx=%u,jd=%u,pe=%u,bc=%u,tx=%u,ms=%lu}\n",
+    "{stats:rx=%u,jd=%u,pe=%u,tx=%u,ms=%lu}\n",
     stats.rx_overflow,
     stats.json_dropped_long,
     stats.parse_errors,
-    stats.binary_crc_fail,
     stats.tx_dropped,
     ms_ago
   );

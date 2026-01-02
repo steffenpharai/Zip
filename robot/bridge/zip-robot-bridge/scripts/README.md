@@ -1,150 +1,138 @@
-# Robot Command Test Scripts
+# ZIP Robot Bridge Test Scripts
 
-## test_robot_serial.py
+## test-integration.ts
 
-Direct serial test suite that communicates with the robot via serial port using the binary protocol. This bypasses the WebSocket bridge and tests the robot firmware directly.
+Comprehensive integration test suite that verifies all bridge functionality via WebSocket.
 
 ### Usage
 
-1. **Install Python dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+# Ensure the bridge is running first
+npm run dev           # Real hardware
+npm run dev:local     # Loopback mode
 
-2. **Run the test suite:**
-   ```bash
-   python scripts/test_robot_serial.py [PORT]
-   ```
-   
-   Or let it auto-detect the port:
-   ```bash
-   python scripts/test_robot_serial.py
-   ```
-   
-   Examples:
-   ```bash
-   # Windows
-   python scripts/test_robot_serial.py COM3
-   
-   # Linux/Mac
-   python scripts/test_robot_serial.py /dev/ttyUSB0
-   ```
+# Run the test suite
+npm run test:integration
+```
 
 ### What It Tests
 
-Same as the WebSocket test suite - all 8 robot command types with 24 test cases total.
+| Test | Description |
+|------|-------------|
+| Health endpoint | HTTP /health returns valid status |
+| WebSocket connect | WS connection established |
+| N=0 Hello | Basic command/response |
+| N=999 Direct Motor | Motor control command |
+| N=201 Stop | Stop command |
+| N=120 Diagnostics | Multi-line diagnostics response |
+| Stream start | Begin setpoint streaming |
+| Stream update | Update setpoint mid-stream |
+| Stream stop | Stop streaming with N=201 |
+| Emergency stop | HTTP POST /api/robot/stop |
 
-### Advantages
+### Expected Output
 
-- Direct serial communication (no bridge dependency)
-- Faster response times
-- Better for debugging protocol issues
-- Can test robot firmware independently
+```
+════════════════════════════════════════════════════════════
+ZIP Robot Bridge Integration Tests
+════════════════════════════════════════════════════════════
+WebSocket: ws://localhost:8765/robot
+Health: http://localhost:8766/health
+────────────────────────────────────────────────────────────
+  ✓ Health endpoint responds
+  ✓ WebSocket connects
+[Test] Waiting for ready status...
+[Test] Bridge is ready
+
+Command Tests:
+  ✓ N=0 Hello → {H_ok}
+  ✓ N=999 Direct Motor → {H_ok}
+  ✓ N=201 Stop → {H_ok}
+  ✓ N=120 Diagnostics → array
+
+Streaming Tests:
+  ✓ Stream start → replyKind none
+  ✓ Stream update
+  ✓ Stream stop → {H_ok}
+
+Emergency Tests:
+  ✓ POST /api/robot/stop
+
+════════════════════════════════════════════════════════════
+TEST SUMMARY
+════════════════════════════════════════════════════════════
+Total: 10 | Passed: 10 | Failed: 0
+Total time: 236ms
+
+✓ All tests passed!
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WS_URL` | `ws://localhost:8765/robot` | WebSocket endpoint |
+| `HEALTH_URL` | `http://localhost:8766/health` | Health endpoint |
 
 ---
 
-## test-all-commands.ts
+## test-all-commands.ts (Legacy)
 
-Comprehensive test suite that tests all available robot commands via WebSocket and verifies ACK responses.
+> **Note**: This script uses the old binary protocol format and is no longer compatible with the current firmware. Use `test-integration.ts` instead.
 
-### Usage
+---
 
-1. **Ensure the bridge service is running:**
-   ```bash
-   npm run dev
-   ```
+## test_robot_serial.py (Legacy)
 
-2. **Ensure the robot is connected and responding:**
-   - The robot should be connected via serial port
-   - The bridge should show "Serial Connected" in logs
-   - The robot should have responded to HELLO command
+> **Note**: This Python script uses the old binary protocol. For direct serial testing, use the Node.js tools in `robot/firmware/zip_robot_uno/tools/`.
 
-3. **Run the test suite:**
-   ```bash
-   npm run test:commands
-   ```
+---
 
-   Or with custom WebSocket URL:
-   ```bash
-   WS_URL=ws://localhost:8765/robot npm run test:commands
-   ```
+## Recommended Testing Workflow
 
-### What It Tests
+### 1. Loopback Test (No Hardware)
 
-The test suite exercises all 8 robot command types:
+```bash
+# Terminal 1: Start bridge in loopback mode
+npm run dev:local
 
-1. **HELLO** - Request robot information
-2. **SET_MODE** - Set operating mode (STANDBY, MANUAL, LINE_FOLLOW, OBSTACLE_AVOID, FOLLOW)
-3. **DRIVE_TWIST** - Twist control (forward, rotate, stop)
-4. **DRIVE_TANK** - Tank drive (forward, turn left, turn right, stop)
-5. **SERVO** - Servo position control (center, left, right)
-6. **LED** - LED color and brightness control (red, green, blue, cyan, off)
-7. **E_STOP** - Emergency stop
-8. **CONFIG_SET** - Configuration setting
-
-### Test Output
-
-The script provides:
-- Real-time progress for each command
-- Success/failure status with response times
-- Summary statistics (success rate, average response time)
-- List of failed commands (if any)
-- Breakdown by command category
-
-### Example Output
-
-```
-============================================================
-Robot Command Test Suite
-============================================================
-WebSocket URL: ws://localhost:8765/robot
-Total commands to test: 24
-
-✓ Bridge service is healthy and robot is connected
-
-[1/24] Testing: HELLO - Request robot info
-  [SENT] HELLO - Request robot info (seq=1)
-  ✓ SUCCESS (45ms) - ACK: ok=true
-
-...
-
-============================================================
-Test Summary
-============================================================
-Total commands: 24
-Successful: 24 (100.0%)
-Failed: 0 (0.0%)
-Average response time: 52ms
-
-Successful Commands by Category:
-  HELLO: 1 test(s)
-  SET_MODE: 5 test(s)
-  DRIVE_TWIST: 3 test(s)
-  DRIVE_TANK: 4 test(s)
-  SERVO: 3 test(s)
-  LED: 5 test(s)
-  E_STOP: 1 test(s)
-  CONFIG_SET: 1 test(s)
+# Terminal 2: Run tests
+npm run test:integration
 ```
 
-### Troubleshooting
+### 2. Hardware Test
 
-**Connection Refused:**
-- Ensure the bridge service is running (`npm run dev`)
-- Check that the WebSocket port (8765) is not blocked
+```bash
+# Terminal 1: Start bridge with real robot
+npm run dev
 
-**Robot Not Connected:**
-- Verify serial port connection
-- Check bridge logs for connection errors
-- Ensure robot firmware is running and responding
+# Terminal 2: Run tests
+npm run test:integration
+```
 
-**Command Timeouts:**
-- Check robot firmware is processing commands
-- Verify serial communication is working
-- Check bridge logs for protocol errors
+### 3. Manual Testing
 
-**ACK Failures:**
-- Review robot firmware logs
-- Check command payload format matches protocol spec
-- Verify robot is in correct mode for the command
+```bash
+# Health check
+curl http://localhost:8766/health
 
+# Emergency stop
+curl -X POST http://localhost:8766/api/robot/stop
+```
+
+---
+
+## Troubleshooting Tests
+
+### Connection Refused
+- Ensure bridge is running: `npm run dev`
+- Check port 8765 is not blocked
+
+### Tests Timeout
+- Check bridge health: `curl http://localhost:8766/health`
+- Verify `"ready": true` in health response
+- Check serial connection to robot
+
+### Wrong Response Format
+- The firmware uses `{<tag>_ok}` format, not `{H_ok}`
+- Tests check for `_ok}` suffix, which handles both formats

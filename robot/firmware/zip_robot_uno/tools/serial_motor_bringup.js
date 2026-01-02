@@ -467,7 +467,7 @@ async function testServo() {
   for (const angle of angles) {
     const startIdx = allResponses.length;
     console.log(`\n[Servo] Pan to ${angle}°`);
-    send(`{"N":5,"H":"srv${angle}","D1":1,"D2":${angle}}`);
+    send(`{"N":5,"H":"srv${angle}","D1":${angle}}`);
     await sleep(350);
     
     const hasAck = allResponses.slice(startIdx).some(r => r.line.includes('_ok'));
@@ -479,41 +479,103 @@ async function testServo() {
 }
 
 // ============================================================
-// PHASE 10: Sensor Reads
+// PHASE 10: Sensor Reads (with value validation)
 // ============================================================
 async function testSensors() {
   console.log('\n' + '═'.repeat(60));
   console.log('PHASE 10: Sensor Reads');
   console.log('═'.repeat(60));
   
-  // Ultrasonic
-  console.log('\n[Sensors] Ultrasonic distance...');
+  // Helper: Parse sensor value from response like {H_123}
+  const parseSensorValue = (responses, tag) => {
+    for (const r of responses) {
+      // Match pattern like {tag_123} or {tag_true} or {tag_false}
+      const match = r.line.match(new RegExp(`\\{${tag}_([^}]+)\\}`));
+      if (match) {
+        return match[1];
+      }
+    }
+    return null;
+  };
+  
+  // Ultrasonic distance mode (D1=2)
+  console.log('\n[Sensors] Ultrasonic distance (D1=2)...');
   let startIdx = allResponses.length;
   send('{"N":21,"H":"ultra","D1":2}');
   await sleep(200);
-  if (allResponses.slice(startIdx).some(r => r.line.includes('_ok'))) {
-    testResults.sensors.passed++;
-    console.log('[Sensors] Ultrasonic: ✓');
-  } else {
-    testResults.sensors.failed++;
-    console.log('[Sensors] Ultrasonic: ✗');
-  }
-  
-  // Line sensors
-  for (let i = 0; i <= 2; i++) {
-    const name = ['Left', 'Middle', 'Right'][i];
-    console.log(`[Sensors] Line sensor ${name}...`);
-    startIdx = allResponses.length;
-    send(`{"N":22,"H":"line${i}","D1":${i}}`);
-    await sleep(150);
-    
-    if (allResponses.slice(startIdx).some(r => r.line.includes('_ok'))) {
+  let value = parseSensorValue(allResponses.slice(startIdx), 'ultra');
+  if (value !== null) {
+    const distance = parseInt(value, 10);
+    if (!isNaN(distance) && distance >= 0) {
       testResults.sensors.passed++;
-      console.log(`[Sensors] ${name}: ✓`);
+      console.log(`[Sensors] Ultrasonic distance: ${distance}cm ✓`);
     } else {
       testResults.sensors.failed++;
-      console.log(`[Sensors] ${name}: ✗`);
+      console.log(`[Sensors] Ultrasonic distance: invalid value "${value}" ✗`);
     }
+  } else {
+    testResults.sensors.failed++;
+    console.log('[Sensors] Ultrasonic distance: no response ✗');
+  }
+  
+  // Ultrasonic obstacle mode (D1=1)
+  console.log('[Sensors] Ultrasonic obstacle (D1=1)...');
+  startIdx = allResponses.length;
+  send('{"N":21,"H":"obs","D1":1}');
+  await sleep(200);
+  value = parseSensorValue(allResponses.slice(startIdx), 'obs');
+  if (value === 'true' || value === 'false') {
+    testResults.sensors.passed++;
+    console.log(`[Sensors] Ultrasonic obstacle: ${value} ✓`);
+  } else {
+    testResults.sensors.failed++;
+    console.log(`[Sensors] Ultrasonic obstacle: invalid response ✗`);
+  }
+  
+  // Line sensors (L/M/R)
+  for (let i = 0; i <= 2; i++) {
+    const name = ['Left', 'Middle', 'Right'][i];
+    const tag = `line${i}`;
+    console.log(`[Sensors] Line sensor ${name}...`);
+    startIdx = allResponses.length;
+    send(`{"N":22,"H":"${tag}","D1":${i}}`);
+    await sleep(150);
+    
+    value = parseSensorValue(allResponses.slice(startIdx), tag);
+    if (value !== null) {
+      const sensorVal = parseInt(value, 10);
+      if (!isNaN(sensorVal) && sensorVal >= 0 && sensorVal <= 1023) {
+        testResults.sensors.passed++;
+        console.log(`[Sensors] ${name}: ${sensorVal} ✓`);
+      } else {
+        testResults.sensors.failed++;
+        console.log(`[Sensors] ${name}: invalid value "${value}" ✗`);
+      }
+    } else {
+      testResults.sensors.failed++;
+      console.log(`[Sensors] ${name}: no response ✗`);
+    }
+  }
+  
+  // Battery voltage (N=23)
+  console.log('[Sensors] Battery voltage...');
+  startIdx = allResponses.length;
+  send('{"N":23,"H":"batt"}');
+  await sleep(150);
+  value = parseSensorValue(allResponses.slice(startIdx), 'batt');
+  if (value !== null) {
+    const voltage_mv = parseInt(value, 10);
+    if (!isNaN(voltage_mv) && voltage_mv >= 0) {
+      const voltage_v = (voltage_mv / 1000).toFixed(2);
+      testResults.sensors.passed++;
+      console.log(`[Sensors] Battery: ${voltage_v}V (${voltage_mv}mV) ✓`);
+    } else {
+      testResults.sensors.failed++;
+      console.log(`[Sensors] Battery: invalid value "${value}" ✗`);
+    }
+  } else {
+    testResults.sensors.failed++;
+    console.log('[Sensors] Battery: no response ✗');
   }
 }
 

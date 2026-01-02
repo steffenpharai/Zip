@@ -1,29 +1,39 @@
 /**
  * ZIP Robot Bridge - Main Entry Point
+ * 
+ * A reliable bridge between WebSocket clients and the ZIP Robot Firmware.
+ * Uses ELEGOO-style JSON protocol over serial at 115200 baud.
  */
 
 import 'dotenv/config';
-import http from 'http';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { SerialManager } from './serial-manager.js';
-import type { DecodedMessage } from './protocol-handler.js';
-import { RobotWebSocketServer, type RobotTelemetry, type RobotInfo, type RobotFault } from './websocket-server.js';
-import { MSG_TYPE_HELLO } from './protocol-handler.js';
+import { SerialPort } from 'serialport';
+import { logger } from './logging/logger.js';
+import { 
+  env, 
+  SERIAL_PORT, 
+  SERIAL_BAUD, 
+  WS_PORT, 
+  HTTP_PORT, 
+  LOOPBACK_MODE,
+} from './config/env.js';
+import { SerialTransport, type TransportState } from './serial/SerialTransport.js';
+import { LoopbackEmulator } from './serial/LoopbackEmulator.js';
+import { ReplyMatcher } from './protocol/ReplyMatcher.js';
+import { SetpointStreamer } from './streaming/SetpointStreamer.js';
+import { RobotWsServer } from './ws/RobotWsServer.js';
+import { HealthServer } from './http/HealthServer.js';
+import { isBootMarker } from './protocol/FirmwareJson.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+// ============================================================================
 // Auto-detect serial port
+// ============================================================================
+
 async function getSerialPort(): Promise<string> {
-  if (process.env.SERIAL_PORT) {
-    return process.env.SERIAL_PORT;
+  if (SERIAL_PORT) {
+    return SERIAL_PORT;
   }
   
-  // Try to auto-detect available ports
   try {
-    const { SerialPort } = await import('serialport');
     const ports = await SerialPort.list();
     
     // Prefer ports that look like Arduino/robot controllers
@@ -35,342 +45,143 @@ async function getSerialPort(): Promise<string> {
     );
     
     if (arduinoPorts.length > 0) {
-      console.log(`[Bridge] Auto-detected port: ${arduinoPorts[0].path}`);
+      logger.info(`Auto-detected port: ${arduinoPorts[0].path}`);
       return arduinoPorts[0].path;
     }
     
-    // Fallback to first available port
     if (ports.length > 0) {
-      console.log(`[Bridge] Using first available port: ${ports[0].path}`);
+      logger.info(`Using first available port: ${ports[0].path}`);
       return ports[0].path;
     }
   } catch (error) {
-    console.warn('[Bridge] Could not auto-detect port:', error);
+    logger.warn('Could not auto-detect port', { 
+      error: error instanceof Error ? error.message : String(error) 
+    });
   }
   
   // Platform-specific defaults
   if (process.platform === 'win32') {
-    return 'COM3'; // Windows default
+    return 'COM3';
   }
-  return '/dev/ttyUSB0'; // Linux default
+  return '/dev/ttyUSB0';
 }
-const SERIAL_BAUD = parseInt(process.env.SERIAL_BAUD || '115200', 10);
-const WS_PORT = parseInt(process.env.WS_PORT || '8765', 10);
-const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8766', 10);
-const LOOPBACK_MODE = process.env.LOOPBACK_MODE === 'true';
 
-let serialManager: SerialManager | null = null;
-let wsServer: RobotWebSocketServer | null = null;
+// ============================================================================
+// Main
+// ============================================================================
 
-// WebSocket server events
-const wsEvents = {
-  onTelemetry: (data: RobotTelemetry) => {
-    console.log('[Bridge] Telemetry received');
-  },
-  onRobotInfo: (info: RobotInfo) => {
-    console.log('[Bridge] Robot info:', info);
-  },
-  onFault: (fault: RobotFault) => {
-    console.error('[Bridge] Fault:', fault);
-  },
-};
-
-// Create WebSocket server
-wsServer = new RobotWebSocketServer(WS_PORT, wsEvents);
-
-// HTTP server for health/info endpoints and static file serving
-const httpServer = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+async function main(): Promise<void> {
+  logger.info('ZIP Robot Bridge starting...', { 
+    loopback: LOOPBACK_MODE,
+    wsPort: WS_PORT,
+    httpPort: HTTP_PORT,
+  });
   
-  const url = req.url || '/';
-  const method = req.method || 'GET';
+  // Create components
+  const replyMatcher = new ReplyMatcher();
+  const streamer = new SetpointStreamer();
+  const wsServer = new RobotWsServer(WS_PORT);
+  const healthServer = new HealthServer(HTTP_PORT);
   
-  // API endpoints (check before static file serving)
-  if (url === '/api/robot/command' && method === 'POST') {
-    res.setHeader('Content-Type', 'application/json');
-    let body = '';
-    req.on('data', (chunk) => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      try {
-        const command = JSON.parse(body);
-        // Forward to WebSocket server (would need to implement)
-        res.writeHead(501);
-        res.end(JSON.stringify({ error: 'REST command API not yet implemented, use WebSocket' }));
-      } catch (error) {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: 'Invalid JSON' }));
-      }
-    });
-    return;
-  }
+  // Wire up dependencies
+  wsServer.setReplyMatcher(replyMatcher);
+  wsServer.setStreamer(streamer);
+  healthServer.setReplyMatcher(replyMatcher);
+  healthServer.setStreamer(streamer);
   
-  // Static file serving
-  if (method === 'GET' && url.startsWith('/')) {
-    // API endpoints
-    if (url === '/health') {
-      res.setHeader('Content-Type', 'application/json');
-      res.writeHead(200);
-      const wsStats = wsServer ? wsServer.getStatistics() : null;
-      res.end(JSON.stringify({
-        status: 'ok',
-        serial: {
-          connected: serialManager?.getIsConnected() || false,
-          port: serialManager?.getPortPath() || null,
-          baudRate: serialManager?.getBaudRate() || null,
-          uptime: serialManager?.getConnectionUptime() || 0,
-        },
-        websocket: {
-          clients: wsServer ? wsServer.getClientCount() : 0,
-          uptime: wsStats ? wsStats.uptime : 0,
-        },
-        timestamp: Date.now(),
-      }));
-      return;
-    }
-    
-    if (url === '/api/robot/status') {
-      res.setHeader('Content-Type', 'application/json');
-      res.writeHead(200);
-      const wsStats = wsServer ? wsServer.getStatistics() : null;
-      res.end(JSON.stringify({
-        connected: serialManager?.getIsConnected() || false,
-        serial: {
-          port: serialManager?.getPortPath() || null,
-          baudRate: serialManager?.getBaudRate() || null,
-          uptime: serialManager?.getConnectionUptime() || 0,
-        },
-        websocket: {
-          clients: wsServer ? wsServer.getClientCount() : 0,
-          uptime: wsStats ? wsStats.uptime : 0,
-          messagesSent: wsStats?.messagesSent || 0,
-          messagesReceived: wsStats?.messagesReceived || 0,
-          commandsSent: wsStats?.commandsSent || 0,
-          commandsSucceeded: wsStats?.commandsSucceeded || 0,
-          commandsFailed: wsStats?.commandsFailed || 0,
-          averageResponseTime: wsServer ? wsServer.getAverageResponseTime() : 0,
-          commandSuccessRate: wsServer ? wsServer.getCommandSuccessRate() : 0,
-        },
-        robot: {
-          info: wsServer ? wsServer.getRobotInfo() : null,
-        },
-        timestamp: Date.now(),
-      }));
-      return;
-    }
-    
-    if (url === '/api/robot/telemetry/latest') {
-      res.setHeader('Content-Type', 'application/json');
-      res.writeHead(200);
-      const latestTelemetry = wsServer ? wsServer.getLatestTelemetry() : null;
-      res.end(JSON.stringify({
-        telemetry: latestTelemetry,
-        timestamp: Date.now(),
-      }));
-      return;
-    }
-    
-    // Serve static files from public directory
-    const publicDir = path.join(__dirname, '..', 'public');
-    let filePath = url === '/' ? path.join(publicDir, 'index.html') : path.join(publicDir, url);
-    
-    // Security: prevent directory traversal
-    const resolvedPath = path.resolve(filePath);
-    const resolvedPublic = path.resolve(publicDir);
-    if (!resolvedPath.startsWith(resolvedPublic)) {
-      res.writeHead(403);
-      res.end('Forbidden');
-      return;
-    }
-    
-    // Determine content type
-    const ext = path.extname(filePath).toLowerCase();
-    const contentTypes: Record<string, string> = {
-      '.html': 'text/html',
-      '.css': 'text/css',
-      '.js': 'application/javascript',
-      '.json': 'application/json',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.svg': 'image/svg+xml',
-      '.ico': 'image/x-icon',
-    };
-    const contentType = contentTypes[ext] || 'application/octet-stream';
-    
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        if (err.code === 'ENOENT') {
-          res.writeHead(404);
-          res.end('Not found');
-        } else {
-          res.writeHead(500);
-          res.end('Internal server error');
-        }
-        return;
+  // Transport event handlers
+  const transportEvents = {
+    onLine: (line: string) => {
+      // Check for boot marker (indicates reset)
+      if (isBootMarker(line)) {
+        logger.info('Boot marker received (firmware reset)');
+        wsServer.broadcastStatus();
       }
       
-      res.setHeader('Content-Type', contentType);
-      res.writeHead(200);
-      res.end(data);
-    });
-    return;
-  }
-  
-  // Legacy endpoints (for backward compatibility)
-  if (method === 'GET' && url === '/diagnostics') {
-    res.setHeader('Content-Type', 'application/json');
-    res.writeHead(200);
-    const wsStats = wsServer ? wsServer.getStatistics() : null;
-    res.end(JSON.stringify({
-      status: 'ok',
-      serial: {
-        connected: serialManager?.getIsConnected() || false,
-        port: serialManager?.getPortPath() || null,
-        baudRate: serialManager?.getBaudRate() || null,
-        uptime: serialManager?.getConnectionUptime() || 0,
-      },
-      websocket: {
-        clients: wsServer ? wsServer.getClientCount() : 0,
-        uptime: wsStats ? wsStats.uptime : 0,
-      },
-      timestamp: Date.now(),
-    }));
-  } else if (req.method === 'GET' && req.url === '/diagnostics') {
-    res.writeHead(200);
-    const wsStats = wsServer ? wsServer.getStatistics() : null;
-    const serialConnected = serialManager?.getIsConnected() || false;
-    res.end(JSON.stringify({
-      serial: {
-        connected: serialConnected,
-        port: serialManager?.getPortPath() || null,
-        baudRate: serialManager?.getBaudRate() || null,
-        uptime: serialManager?.getConnectionUptime() || 0,
-        connectionStartTime: serialManager?.getConnectionStartTime() || null,
-      },
-      websocket: {
-        clients: wsServer ? wsServer.getClientCount() : 0,
-        uptime: wsStats ? wsStats.uptime : 0,
-        messagesSent: wsStats?.messagesSent || 0,
-        messagesReceived: wsStats?.messagesReceived || 0,
-        commandsSent: wsStats?.commandsSent || 0,
-        commandsSucceeded: wsStats?.commandsSucceeded || 0,
-        commandsFailed: wsStats?.commandsFailed || 0,
-        averageResponseTime: wsServer ? wsServer.getAverageResponseTime() : 0,
-        commandSuccessRate: wsServer ? wsServer.getCommandSuccessRate() : 0,
-        responseTimeCount: wsStats?.responseTimeCount || 0,
-        errors: wsStats?.errors || 0,
-        lastErrorTime: wsStats?.lastErrorTime || null,
-      },
-      robot: {
-        info: wsServer ? wsServer.getRobotInfo() : null,
-      },
-      timestamp: Date.now(),
-    }));
-  } else if (method === 'GET' && url === '/robot/info') {
-    res.setHeader('Content-Type', 'application/json');
-    res.writeHead(200);
-    res.end(JSON.stringify({
-      connected: serialManager?.getIsConnected() || false,
-      info: wsServer ? wsServer.getRobotInfo() : null,
-    }));
-  }
-});
-
-httpServer.listen(HTTP_PORT, () => {
-  console.log(`[HTTP] Server listening on http://localhost:${HTTP_PORT}`);
-});
-
-// Serial manager (or loopback mode)
-if (LOOPBACK_MODE) {
-  console.log('[Bridge] Running in LOOPBACK mode (no robot connection)');
-  // Simulate telemetry
-  setInterval(() => {
-    if (wsServer) {
-      const simulatedTelemetry = {
-        ts_ms: Date.now(),
-        imu: { ax: 0, ay: 0, az: 0, gx: 0, gy: 0, gz: 0, yaw: 0 },
-        ultrasonic_mm: 200,
-        line_adc: [512, 512, 512],
-        batt_mv: 7400,
-        motor_state: { left: 0, right: 0 },
-        mode: 0,
-      };
-      wsServer.handleRobotMessage({
-        type: 0x83, // MSG_TYPE_TELEMETRY
-        seq: 0,
-        payload: new TextEncoder().encode(JSON.stringify(simulatedTelemetry)),
-        valid: true,
-      });
-    }
-  }, 100); // 10Hz telemetry
-} else {
-  // Real serial connection
-  const serialEvents = {
-    onMessage: (msg: DecodedMessage) => {
-      if (wsServer) {
-        wsServer.handleRobotMessage(msg);
+      // Forward to reply matcher
+      replyMatcher.processLine(line);
+      
+      // Broadcast to WS clients
+      wsServer.broadcastRxLine(line);
+    },
+    onStateChange: (state: TransportState) => {
+      logger.info(`Transport state: ${state}`);
+      
+      if (state === 'ready') {
+        wsServer.markReady();
       }
+      
+      wsServer.broadcastStatus();
     },
     onError: (error: Error) => {
-      console.error('[Serial] Error:', error);
-    },
-    onConnect: async () => {
-      console.log('[Serial] Connected');
-      // Broadcast connection state change
-      if (wsServer) {
-        wsServer.broadcastConnectionState();
-      }
-      // Send HELLO on connect
-      if (serialManager) {
-        const { ProtocolEncoder, MSG_TYPE_HELLO } = await import('./protocol-handler.js');
-        const encoder = new ProtocolEncoder();
-        const helloPayload = new TextEncoder().encode('{}');
-        const frame = encoder.encode(MSG_TYPE_HELLO, encoder.getNextSeq(), helloPayload);
-        serialManager.write(frame);
-      }
-    },
-    onDisconnect: () => {
-      console.log('[Serial] Disconnected');
-      // Broadcast connection state change
-      if (wsServer) {
-        wsServer.broadcastConnectionState();
-      }
+      logger.error('Transport error', { error: error.message });
     },
   };
   
-  // Get serial port (async) and connect
-  (async () => {
-    const serialPort = await getSerialPort();
-    console.log(`[Bridge] Using serial port: ${serialPort}`);
-    
-    serialManager = new SerialManager(serialPort, SERIAL_BAUD, serialEvents);
-    wsServer.setSerialManager(serialManager);
-    
-    serialManager.connect().catch((error) => {
-      console.error('[Bridge] Failed to connect to serial port:', error);
-      console.error(`[Bridge] Port: ${serialPort}`);
-      console.error('[Bridge] Make sure the robot is connected and the port is correct');
-      console.error('[Bridge] You can set SERIAL_PORT environment variable to override');
+  // Create transport (real or loopback)
+  let transport: SerialTransport | LoopbackEmulator;
+  
+  if (LOOPBACK_MODE) {
+    logger.info('Running in LOOPBACK mode (no hardware)');
+    transport = new LoopbackEmulator(transportEvents);
+  } else {
+    const portPath = await getSerialPort();
+    logger.info(`Using serial port: ${portPath} @ ${SERIAL_BAUD} baud`);
+    transport = new SerialTransport(portPath, transportEvents, SERIAL_BAUD);
+  }
+  
+  // Wire transport to other components
+  wsServer.setTransport(transport as SerialTransport);
+  healthServer.setTransport(transport as SerialTransport);
+  
+  // Set up streamer to send commands via transport
+  streamer.setSendFunction((cmd) => {
+    return transport.writeCommand(cmd);
+  });
+  
+  // Open transport
+  try {
+    await transport.open();
+  } catch (error) {
+    logger.error('Failed to open transport', { 
+      error: error instanceof Error ? error.message : String(error) 
     });
-  })();
+    if (!LOOPBACK_MODE) {
+      logger.error('Make sure the robot is connected and the port is correct');
+      logger.error('Set SERIAL_PORT environment variable to override');
+    }
+  }
+  
+  // Graceful shutdown
+  const shutdown = async () => {
+    logger.info('Shutting down...');
+    
+    // Stop streaming
+    if (streamer.isStreaming()) {
+      await streamer.stop(true);
+    }
+    
+    // Cleanup
+    replyMatcher.cleanup();
+    streamer.cleanup();
+    wsServer.close();
+    healthServer.close();
+    await transport.close();
+    logger.close();
+    
+    process.exit(0);
+  };
+  
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  
+  logger.info('Bridge started successfully', {
+    wsEndpoint: `ws://localhost:${WS_PORT}/robot`,
+    httpEndpoint: `http://localhost:${HTTP_PORT}`,
+  });
 }
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n[Bridge] Shutting down...');
-  if (serialManager) {
-    serialManager.disconnect();
-  }
-  if (wsServer) {
-    wsServer.close();
-  }
-  httpServer.close();
-  process.exit(0);
+main().catch((error) => {
+  logger.error('Fatal error', { error: error instanceof Error ? error.message : String(error) });
+  process.exit(1);
 });
-
-console.log('[Bridge] ZIP Robot Bridge Service started');
-console.log(`[Bridge] Serial: (auto-detecting...) @ ${SERIAL_BAUD} baud`);
-console.log(`[Bridge] WebSocket: ws://localhost:${WS_PORT}/robot`);
-console.log(`[Bridge] HTTP: http://localhost:${HTTP_PORT}`);
-

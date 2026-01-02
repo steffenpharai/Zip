@@ -4,36 +4,36 @@
 
 #include "macro_engine.h"
 
-// FIGURE_8 macro steps
+// FIGURE_8 macro steps (using official ELEGOO obstacle avoidance speed ~150)
 const MacroEngine::MacroStep MacroEngine::figure8_steps[] = {
-  {100, 50, 2000},   // Forward-right arc
-  {100, -50, 2000},  // Forward-left arc
-  {100, 50, 2000},   // Forward-right arc
-  {100, -50, 2000},  // Forward-left arc
+  {150, 75, 2000},   // Forward-right arc
+  {150, -75, 2000},  // Forward-left arc
+  {150, 75, 2000},   // Forward-right arc
+  {150, -75, 2000},  // Forward-left arc
   {0, 0, 500}        // Stop
 };
 const size_t MacroEngine::figure8_step_count = sizeof(figure8_steps) / sizeof(MacroStep);
 
-// SPIN_360 macro steps
+// SPIN_360 macro steps (using official ELEGOO rocker speed ~250)
 const MacroEngine::MacroStep MacroEngine::spin360_steps[] = {
-  {0, 200, 1800},    // Spin in place (360 degrees)
+  {0, 250, 1800},    // Spin in place (360 degrees)
   {0, 0, 500}        // Stop
 };
 const size_t MacroEngine::spin360_step_count = sizeof(spin360_steps) / sizeof(MacroStep);
 
-// WIGGLE macro steps
+// WIGGLE macro steps (using official ELEGOO speeds)
 const MacroEngine::MacroStep MacroEngine::wiggle_steps[] = {
-  {50, 100, 300},    // Right
-  {50, -100, 300},   // Left
-  {50, 100, 300},    // Right
-  {50, -100, 300},   // Left
+  {100, 150, 300},   // Forward-right
+  {100, -150, 300},  // Forward-left
+  {100, 150, 300},   // Forward-right
+  {100, -150, 300},  // Forward-left
   {0, 0, 500}        // Stop
 };
 const size_t MacroEngine::wiggle_step_count = sizeof(wiggle_steps) / sizeof(MacroStep);
 
-// FORWARD_THEN_STOP macro steps
+// FORWARD_THEN_STOP macro steps (using official ELEGOO speed)
 const MacroEngine::MacroStep MacroEngine::forward_then_stop_steps[] = {
-  {150, 0, 2000},    // Forward
+  {200, 0, 2000},    // Forward at good speed
   {0, 0, 500}        // Stop
 };
 const size_t MacroEngine::forward_then_stop_step_count = sizeof(forward_then_stop_steps) / sizeof(MacroStep);
@@ -143,8 +143,13 @@ void MacroEngine::update() {
     state.targetW = steps[state.stepIndex].w;
   }
   
-  // Apply current step target to motors
-  motorDriver->setMotors(state.targetV, state.targetW);
+  // Apply current step target to motors with differential mixing
+  // Official ELEGOO pattern: left = v - w, right = v + w
+  int16_t left = state.targetV - state.targetW;
+  int16_t right = state.targetV + state.targetW;
+  left = constrain(left, -255, 255);
+  right = constrain(right, -255, 255);
+  motorDriver->setMotors(left, right);
 }
 
 const MacroEngine::MacroStep* MacroEngine::getMacroSteps(MacroID id, size_t& count) {

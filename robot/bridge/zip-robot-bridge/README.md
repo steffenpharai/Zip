@@ -1,143 +1,469 @@
-# ZIP Robot Bridge Service
+# ZIP Robot Bridge
 
-Bridge service that translates between WebSocket clients and the robot's binary serial protocol.
+A reliable bridge service that translates WebSocket messages to ELEGOO-style JSON serial protocol for the ZIP Robot Firmware.
 
 ## Features
 
-- Binary protocol framing (CRC16 validated)
-- Command queue with retries and timeouts
-- Telemetry streaming
-- WebSocket server for multiple clients
-- HTTP health endpoints
-- Loopback mode for testing without robot
+- **Line-oriented serial I/O** with proper boot marker detection
+- **Handshake state machine** for reliable startup
+- **Deterministic request/response correlation** using FIFO matching
+- **Setpoint streaming** with rate limiting and TTL enforcement
+- **Priority queue** with backpressure protection
+- **WebSocket API** with Zod validation
+- **LOOPBACK_MODE** for testing without hardware
 
-## Setup
+## Quick Start
 
-1. Install dependencies:
 ```bash
+# Install dependencies
 npm install
-```
 
-2. Configure environment:
-```bash
-cp .env.example .env
-# Edit .env with your serial port path
-```
-
-3. Build:
-```bash
-npm run build
-```
-
-4. Run:
-```bash
-npm start
-```
-
-For development with hot reload:
-```bash
+# Run with real hardware (auto-detects port)
 npm run dev
+
+# Run in loopback mode (no hardware)
+npm run dev:local
+
+# Run integration tests (requires bridge running)
+npm run test:integration
+
+# Health check
+npm run test:health
 ```
 
-## Configuration
+## Architecture
 
-- `SERIAL_PORT`: Serial port path (e.g., `/dev/ttyUSB0` on Linux, `COM3` on Windows)
-- `SERIAL_BAUD`: Baud rate (default: 115200)
-- `WS_PORT`: WebSocket server port (default: 8765)
-- `HTTP_PORT`: HTTP server port (default: 8766)
-- `LOOPBACK_MODE`: Enable loopback mode (simulated robot)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     WebSocket Clients                        │
+│                    ws://localhost:8765/robot                 │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+┌─────────────────────────▼───────────────────────────────────┐
+│                    RobotWsServer                             │
+│  - Zod message validation                                    │
+│  - Command routing                                           │
+│  - Stream management                                         │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│ ReplyMatcher │ │ SetpointStr- │ │ HealthServer │
+│              │ │ eamer        │ │ :8766        │
+│ FIFO queue   │ │ Single timer │ │              │
+│ Token/diag   │ │ Coalescing   │ │ /health      │
+│ matching     │ │ TTL clamp    │ │ /api/robot/  │
+└──────────────┘ └──────────────┘ │ stop         │
+          │               │       └──────────────┘
+          └───────────────┼───────────────┘
+                          │
+┌─────────────────────────▼───────────────────────────────────┐
+│                   SerialTransport                            │
+│  - Line-oriented RX (ReadlineParser)                         │
+│  - Boot marker detection ("R\n")                             │
+│  - Hello handshake (N=0 → {<tag>_ok})                        │
+│  - Priority queue with rate limiting                         │
+│  - Setpoint coalescing                                       │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  ZIP Robot Firmware   │
+              │  115200 baud          │
+              │  ELEGOO JSON Protocol │
+              └───────────────────────┘
+```
+
+## Firmware Protocol
+
+The firmware uses ELEGOO-style JSON commands:
+
+```json
+{"N":<command>,"H":"<tag>","D1":<val>,"D2":<val>,"T":<ttl>}
+```
+
+### Commands
+
+| N | Command | Parameters | Response | Description |
+|---|---------|------------|----------|-------------|
+| 0 | Hello | H=tag | `{<tag>_ok}` | Handshake/ping |
+| 120 | Diagnostics | H=tag | Multi-line | Debug state dump |
+| 200 | Setpoint | D1=v, D2=w, T=ttl | (none) | Streaming motion |
+| 201 | Stop | H=tag | `{<tag>_ok}` | Immediate stop |
+| 210 | Macro Start | D1=id, H=tag | `{<tag>_ok}` | Start macro |
+| 211 | Macro Cancel | H=tag | `{<tag>_ok}` | Cancel macro |
+| 999 | Direct Motor | D1=L, D2=R, H=tag | `{<tag>_ok}` | Raw PWM control |
+
+### Response Format
+
+The firmware responds with `{<tag>_<result>}` where:
+- `<tag>` is the H value from the command (truncated to ~8 chars)
+- `<result>` is one of: `ok`, `false`, `true`, `value`
+
+Examples:
+- Command: `{"N":0,"H":"hello"}` → Response: `{hello_ok}`
+- Command: `{"N":999,"H":"test_motor","D1":100,"D2":100}` → Response: `{test_mo_ok}`
+- Command: `{"N":201,"H":"stop"}` → Response: `{stop_ok}`
+
+### Diagnostics Response (N=120)
+
+Returns multiple lines:
+```
+{<owner><L>,<R>,<stby>,<state>,<resets>}
+{stats:rx=<rx>,jd=<jd>,pe=<pe>,bc=<bc>,tx=<tx>,ms=<ms>}
+```
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| owner | `I`=Idle, `D`=Direct, `X`=Stopped | Motion owner |
+| L, R | -255 to 255 | Current PWM values |
+| stby | 0/1 | Motor driver standby |
+| state | 0-4 | Motion controller state |
+| resets | 0+ | Reset counter |
+
+### Boot Marker
+
+On power-up or reset, the firmware sends `R\n` to indicate it's ready.
 
 ## WebSocket API
 
-Connect to: `ws://localhost:8765/robot`
+### Endpoint
 
-### Sending Commands
+```
+ws://localhost:8765/robot
+```
+
+### Client → Bridge Messages
+
+#### robot.command
+
+Send a firmware command and wait for response.
 
 ```json
 {
-  "type": "command",
-  "cmd": "DRIVE_TWIST",
-  "payload": {"v": 100, "omega": 50},
-  "seq": 1
+  "type": "robot.command",
+  "id": "unique-uuid",
+  "payload": {
+    "N": 201,
+    "H": "stop",
+    "D1": 0,
+    "D2": 0,
+    "T": 0
+  },
+  "expectReply": true,
+  "timeoutMs": 250
 }
 ```
 
-### Receiving Telemetry
+#### robot.stream.start
+
+Start setpoint streaming.
 
 ```json
 {
-  "type": "telemetry",
-  "data": {
-    "ts_ms": 12345,
-    "imu": {...},
-    "ultrasonic_mm": 200,
-    ...
-  }
+  "type": "robot.stream.start",
+  "id": "unique-uuid",
+  "rateHz": 10,
+  "ttlMs": 200,
+  "v": 80,
+  "w": 0
 }
 ```
 
-## HTTP Endpoints
+#### robot.stream.update
 
-- `GET /health` - Service health status
-- `GET /robot/info` - Robot information (if connected)
-- `GET /diagnostics` - Detailed diagnostics and statistics
+Update setpoint during streaming.
 
-## Docker Deployment
+```json
+{
+  "type": "robot.stream.update",
+  "id": "unique-uuid",
+  "v": 80,
+  "w": 30,
+  "ttlMs": 200
+}
+```
 
-The robot bridge service can be deployed using Docker. See the main project's [Docker documentation](../../../docs/docker/README.md) for comprehensive setup instructions.
+#### robot.stream.stop
 
-### Quick Start with Docker
+Stop streaming.
+
+```json
+{
+  "type": "robot.stream.stop",
+  "id": "unique-uuid",
+  "hardStop": true
+}
+```
+
+### Bridge → Client Messages
+
+#### robot.reply
+
+Response to a command or stream message.
+
+```json
+{
+  "type": "robot.reply",
+  "id": "unique-uuid",
+  "ok": true,
+  "replyKind": "token",
+  "token": "{hello_ok}",
+  "diagnostics": null,
+  "timingMs": 12
+}
+```
+
+| replyKind | Description |
+|-----------|-------------|
+| `token` | Single token response like `{hello_ok}` |
+| `diagnostics` | Array of diagnostic lines |
+| `none` | Fire-and-forget (N=200, stream messages) |
+
+#### robot.serial.rx
+
+Raw serial line received (for debugging).
+
+```json
+{
+  "type": "robot.serial.rx",
+  "line": "{hello_ok}",
+  "ts": 1700000000
+}
+```
+
+#### robot.status
+
+Bridge health snapshot.
+
+```json
+{
+  "type": "robot.status",
+  "ready": true,
+  "port": "COM5",
+  "baud": 115200,
+  "streaming": true,
+  "streamRateHz": 10,
+  "rxBytes": 12345,
+  "txBytes": 6789,
+  "pending": 1,
+  "lastReadyMsAgo": 1200
+}
+```
+
+## HTTP API
+
+### GET /health
+
+Health check endpoint.
+
+```json
+{
+  "status": "ok",
+  "serialOpen": true,
+  "ready": true,
+  "port": "COM5",
+  "baud": 115200,
+  "streaming": false,
+  "pendingQueueDepth": 0,
+  "lastRxAt": 1700000000,
+  "lastTxAt": 1700000000,
+  "lastBootMarkerAt": 1700000000,
+  "resetsSeen": 1,
+  "rxBytes": 1234,
+  "txBytes": 567,
+  "uptime": 60000,
+  "timestamp": 1700000000
+}
+```
+
+### POST /api/robot/stop
+
+Emergency stop endpoint. Immediately stops streaming and sends N=201.
+
+```json
+{
+  "ok": true,
+  "message": "Emergency stop sent",
+  "timestamp": 1700000000
+}
+```
+
+## Handshake Behavior
+
+1. **Open port** with DTR settle delay (700ms default)
+2. **Wait for boot marker** (`R\n`) or timeout (1500ms)
+3. **Send N=0 hello** up to 3 times
+4. **Wait for `{<tag>_ok}`** response
+5. **Mark ready** and begin normal operation
+
+If the firmware resets at any time, the bridge detects the boot marker and broadcasts a status update.
+
+## Streaming Semantics
+
+- **Rate limit**: Max 20Hz, default 10Hz
+- **TTL**: Clamped to 150-300ms, default 200ms
+- **Coalescing**: Only latest setpoint sent if queue builds up
+- **Stop priority**: N=201 always preempts queue
+- **Fire-and-forget**: N=200 never expects response
+
+## Priority Queue
+
+| Priority | Commands | Behavior |
+|----------|----------|----------|
+| 0 (highest) | N=201 Stop | Never dropped, preempts queue |
+| 1 | N=120 Diagnostics | Normal queue |
+| 2 | N=999 Direct Motor | Normal queue |
+| 3 | Other commands | Normal queue |
+| 4 (lowest) | N=200 Setpoints | Coalesced (keep latest only) |
+
+Global rate limit: 50 commands/second
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERIAL_PORT` | auto-detect | Serial port path |
+| `SERIAL_BAUD` | 115200 | Baud rate |
+| `WS_PORT` | 8765 | WebSocket server port |
+| `HTTP_PORT` | 8766 | HTTP server port |
+| `LOOPBACK_MODE` | false | Enable loopback testing mode |
+| `DEBUG` | false | Enable verbose logging |
+| `STREAM_DEFAULT_RATE_HZ` | 10 | Default streaming rate |
+| `STREAM_MAX_RATE_HZ` | 20 | Maximum streaming rate |
+| `STREAM_DEFAULT_TTL_MS` | 200 | Default setpoint TTL |
+| `STREAM_MIN_TTL_MS` | 150 | Minimum TTL (clamped) |
+| `STREAM_MAX_TTL_MS` | 300 | Maximum TTL (clamped) |
+| `HANDSHAKE_TIMEOUT_MS` | 1500 | Boot marker timeout |
+| `COMMAND_TIMEOUT_MS` | 250 | Command response timeout |
+| `DTR_SETTLE_MS` | 700 | DTR settle delay on open |
+| `LOG_PATH` | ./data/bridge.log | NDJSON log file path |
+
+## Logging
+
+Logs are written in NDJSON format to `./data/bridge.log`:
+
+```json
+{"timestamp":1700000000,"event":"serial_open","data":{"port":"COM5","baud":115200}}
+{"timestamp":1700000001,"event":"handshake_step","data":{"step":"boot_marker"}}
+{"timestamp":1700000002,"event":"handshake_step","data":{"step":"complete"}}
+{"timestamp":1700000003,"event":"tx_cmd","data":{"N":200,"priority":4}}
+```
+
+Set `DEBUG=true` for verbose `rx_line` logging.
+
+## Testing
+
+### Loopback Mode
+
+Run the bridge with `LOOPBACK_MODE=true` to test without hardware:
 
 ```bash
-# From project root
-docker-compose up robot-bridge
-
-# Or using Makefile
-make dev:robot
+npm run dev:local
 ```
 
-### Docker Configuration
+The loopback emulator:
+- Emits `R\n` boot marker on connect
+- Responds `{<tag>_ok}` to N=0, N=201, N=999, N=210, N=211
+- Emits diagnostic lines for N=120
+- Ignores N=200 (no response, like real firmware)
 
-The service is configured in `docker-compose.yml` with:
+### Integration Tests
 
-- **Development**: `Dockerfile.dev` with hot reloading
-- **Production**: `Dockerfile` with multi-stage build
-- **Serial Port Access**: Configure device mapping in docker-compose.yml
-- **Health Checks**: Automatic health monitoring
-- **Resource Limits**: CPU and memory constraints
+```bash
+# Start bridge (real or loopback)
+npm run dev      # or npm run dev:local
 
-### Serial Port Access in Docker
-
-To access serial ports from Docker, configure in `docker-compose.yml`:
-
-**Linux**:
-```yaml
-devices:
-  - /dev/ttyUSB0:/dev/ttyUSB0
+# Run tests in another terminal
+npm run test:integration
 ```
 
-**Windows/WSL2**:
-```yaml
-devices:
-  - //./COM3:/dev/ttyUSB0
+Expected output:
+```
+════════════════════════════════════════════════════════════
+TEST SUMMARY
+════════════════════════════════════════════════════════════
+Total: 10 | Passed: 10 | Failed: 0
+Total time: 236ms
+
+✓ All tests passed!
 ```
 
-**Alternative** (less secure):
-```yaml
-privileged: true
+## Module Structure
+
+```
+src/
+├── config/
+│   └── env.ts              # Validated environment variables
+├── logging/
+│   └── logger.ts           # NDJSON file logger
+├── protocol/
+│   ├── FirmwareJson.ts     # Type guards, builders, clamps
+│   └── ReplyMatcher.ts     # FIFO response correlation
+├── serial/
+│   ├── SerialTransport.ts  # Line-oriented serial I/O
+│   └── LoopbackEmulator.ts # Testing emulator
+├── streaming/
+│   └── SetpointStreamer.ts # Single-timer streaming
+├── ws/
+│   └── RobotWsServer.ts    # WebSocket handling
+├── http/
+│   └── HealthServer.ts     # Health + emergency stop
+└── index.ts                # Main entry point
 ```
 
-### Environment Variables
+## Troubleshooting
 
-All environment variables can be set in `.env` file or docker-compose.yml:
+### Bridge shows "handshaking" but never becomes ready
 
-- `SERIAL_PORT` - Serial port path (auto-detected if not set)
-- `SERIAL_BAUD` - Baud rate (default: 115200)
-- `WS_PORT` - WebSocket port (default: 8765)
-- `HTTP_PORT` - HTTP port (default: 8766)
-- `LOOPBACK_MODE` - Enable loopback mode (default: false)
+**Cause**: The bridge is waiting for a response to the hello command.
 
-### Testing Without Hardware
+**Solutions**:
+1. Check that the robot is powered on and connected
+2. Verify the correct COM port is being used
+3. Check if another application is using the serial port
+4. Try resetting the robot (the bridge will detect the boot marker)
 
-Set `LOOPBACK_MODE=true` in your `.env` file to run the bridge without a physical robot. This simulates robot telemetry for testing.
+### Commands timeout
 
+**Cause**: The firmware isn't responding within the timeout period.
+
+**Solutions**:
+1. Check the health endpoint: `curl http://localhost:8766/health`
+2. Verify the firmware is running (should see boot marker on reset)
+3. Increase `COMMAND_TIMEOUT_MS` if needed
+
+### Streaming doesn't work
+
+**Cause**: N=200 setpoint commands are fire-and-forget (no response).
+
+**Note**: This is expected behavior. The firmware processes setpoints silently. 
+Use N=120 diagnostics to verify the robot is receiving commands.
+
+### Robot resets during operation
+
+**Cause**: Firmware watchdog timeout or RAM issues.
+
+**Solutions**:
+1. Check firmware RAM usage (<85%)
+2. Reduce command rate if flooding the serial buffer
+3. Check power supply stability
+
+## Version History
+
+### v2.0.0 (January 2026)
+
+- Complete refactor for ELEGOO-style JSON protocol
+- Added proper handshake state machine with boot marker detection
+- Added FIFO reply matching for deterministic correlation
+- Added setpoint streaming with coalescing and TTL enforcement
+- Added priority queue with rate limiting (50 cmd/s)
+- Added loopback testing mode
+- Added Zod validation for WebSocket messages
+- Added emergency stop HTTP endpoint
+- Fixed token response pattern to match actual firmware format `{<tag>_ok}`
+
+### v1.0.0 (Initial)
+
+- Binary protocol with CRC16 (incorrect for this firmware)

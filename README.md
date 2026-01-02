@@ -11,6 +11,7 @@ A production-grade, state-of-the-art (2026) Jarvis-style HUD assistant built wit
 - **📚 Document Intelligence**: PDF ingestion, vector search, and Q&A with citations
 - **🌐 Web Research**: Automated research pipeline with source validation and citations
 - **📝 Notes & Timers**: Full CRUD operations for notes and server-side timer reminders
+- **🤖 Robot Control**: Full ELEGOO Smart Robot Car V4.0 integration via WebSocket bridge
 - **🔒 Security**: Permission-based tool access, input validation, and audit logging
 - **📊 Observability**: Comprehensive tracing, audit logs, and request tracking
 - **🎨 Projector Mode**: Optimized display mode for large-screen presentations
@@ -36,96 +37,416 @@ A production-grade, state-of-the-art (2026) Jarvis-style HUD assistant built wit
 4. **Open your browser:**
    Navigate to [http://localhost:3000](http://localhost:3000)
 
-## Docker Deployment
+## Local Development (Without Docker)
 
-ZIP can be run in Docker with hot reloading for development and optimized builds for production.
+ZIP can be run as two independent services locally without Docker. This setup is useful for development and debugging.
 
 ### Prerequisites
 
-- Docker and Docker Compose installed
+- Node.js 18+ installed
+- npm or yarn package manager
 - `.env` file configured (see [Environment Variables](#environment-variables))
+- Serial port available (if using robot bridge) or `LOOPBACK_MODE=true` for testing
+
+### Service Architecture
+
+ZIP consists of two services:
+
+1. **zip-app** (Next.js application)
+   - Port: 3000
+   - Health: `GET /api/health`
+   - Hot reloading in development
+
+2. **robot-bridge** (Robot communication bridge)
+   - WebSocket: 8765
+   - HTTP: 8766
+   - Health: `GET /health`
+   - Serial port access for robot communication
+
+### Initial Setup
+
+1. **Install dependencies for both services:**
+
+   ```bash
+   # Install ZIP app dependencies
+   npm install
+
+   # Install robot bridge dependencies (optional - standalone service)
+   cd robot/bridge/zip-robot-bridge
+   npm install
+   cd ../../..
+   ```
+
+2. **Configure environment variables:**
+
+   ```bash
+   # Copy example environment file
+   cp example-env .env
+
+   # Edit .env and add your OPENAI_API_KEY
+   # Note: Robot bridge is a standalone PlatformIO service (optional)
+   ```
+
+3. **Verify builds:**
+
+   ```bash
+   # Unix/Linux/macOS
+   ./scripts/build-local.sh
+
+   # Windows
+   scripts\build-local.bat
+   ```
+
+   Or manually:
+   ```bash
+   # TypeScript compilation check
+   npm run typecheck
+   cd robot/bridge/zip-robot-bridge && npm run typecheck && cd ../../..
+
+   # Production builds
+   npm run build:local
+   cd robot/bridge/zip-robot-bridge && npm run build:local && cd ../../..
+   ```
+
+### Running Services
+
+**Terminal 1 - ZIP App:**
+```bash
+npm run dev:local
+```
+
+**Terminal 2 - Robot Bridge (Optional - Standalone PlatformIO Service):**
+```bash
+npm run dev:bridge
+```
+
+**Note:** The robot bridge is a standalone PlatformIO-based service. The ZIP app does not require it to run. See `robot/bridge/zip-robot-bridge/README.md` for bridge server details.
+
+### Service URLs
+
+Once running, access services at:
+
+- **ZIP App**: [http://localhost:3000](http://localhost:3000)
+- **Robot Bridge Health**: [http://localhost:8766/health](http://localhost:8766/health)
+- **Robot Bridge WebSocket**: `ws://localhost:8765/robot`
+
+### Available Scripts
+
+#### ZIP App (Root Directory)
+
+- `npm run dev:local` - Start ZIP app in development mode
+- `npm run dev:bridge` - Start robot bridge in development mode
+- `npm run build:local` - Build ZIP app for production
+- `npm run build:bridge` - Build robot bridge for production
+- `npm run test:local` - Run full test suite (build + health + E2E + integration)
+- `npm run test:health` - Health check both services
+- `npm run test:integration` - Integration tests between services
+
+#### Robot Bridge (`robot/bridge/zip-robot-bridge/`)
+
+- `npm run dev:local` - Development mode with hot reload
+- `npm run build:local` - Production build
+- `npm start` - Run production build
+- `npm run test:health` - Health check endpoint test
+
+### Testing
+
+#### Health Checks
+
+Test that both services are running and healthy:
+
+```bash
+npm run test:health
+```
+
+#### Integration Tests
+
+Test WebSocket connection and command flow:
+
+```bash
+npm run test:integration
+```
+
+#### Full Test Suite
+
+Run complete test suite (requires services to be running):
+
+```bash
+npm run test:local
+```
+
+This will run:
+1. Build verification (TypeScript + production builds)
+2. Service availability check
+3. Health check tests
+4. Integration tests
+5. E2E tests (Playwright)
+
+**Note:** Make sure both services are running before running the full test suite.
+
+#### E2E Tests
+
+Run Playwright E2E tests:
+
+```bash
+npm run test:e2e
+```
+
+### Environment Variables for Local Development
+
+Key environment variables for local development:
+
+- `OPENAI_API_KEY` - Required: Your OpenAI API key
+- `NEXT_PUBLIC_ROBOT_BRIDGE_WS_URL` - Robot bridge WebSocket URL (optional, for bridge server: `ws://localhost:8765/robot`)
+- `SERIAL_PORT` - Serial port path for bridge server (e.g., `COM5` on Windows, `/dev/ttyUSB0` on Linux)
+- `SERIAL_BAUD` - Serial baud rate for bridge server (default: `115200`)
+- `LOOPBACK_MODE` - Enable loopback mode for bridge server testing (default: `false`)
+
+See [Environment Variables](#environment-variables) section for complete list.
+
+### Troubleshooting
+
+**Services won't start:**
+
+- Verify Node.js version: `node --version` (should be 18+)
+- Check dependencies are installed: `npm install` in both directories
+- Verify `.env` file exists and has required variables
+
+**Robot bridge connection issues (optional service):**
+
+- Robot bridge is standalone - ZIP app works without it
+- Check serial port is available: `npm run dev:bridge` will show available ports
+- Use loopback mode for testing: Set `LOOPBACK_MODE=true` in bridge `.env`
+- See `robot/bridge/zip-robot-bridge/README.md` for bridge server documentation
+
+**Health checks failing:**
+
+- Ensure both services are running
+- Check ports are not in use: `3000` (ZIP app), `8765` (WebSocket), `8766` (HTTP)
+- Verify firewall isn't blocking connections
+
+**Build failures:**
+
+- Run `npm run typecheck` to see TypeScript errors
+- Clear build caches: `rm -rf .next dist` (Unix) or `rmdir /s .next dist` (Windows)
+- Reinstall dependencies: `rm -rf node_modules && npm install`
+
+**Integration tests failing:**
+
+- Robot bridge is optional - ZIP app works standalone
+- If testing bridge: Check WebSocket connection: `ws://localhost:8765/robot`
+- If testing bridge: Verify bridge is in loopback mode if no hardware connected
+
+### Production Builds
+
+To run production builds locally:
+
+**Terminal 1 - ZIP App:**
+```bash
+npm run build:local
+npm start
+```
+
+**Terminal 2 - Robot Bridge (Optional - Standalone PlatformIO Service):**
+```bash
+cd robot/bridge/zip-robot-bridge
+npm run build:local
+npm start
+```
+
+## Docker Deployment
+
+ZIP can be run in Docker with hot reloading for development and optimized builds for production. The Docker setup includes the ZIP application and optionally the standalone PlatformIO robot bridge service.
+
+### Prerequisites
+
+- Docker Desktop (Windows/Mac) or Docker Engine (Linux)
+- Docker Compose v2.0+
+- `.env` file configured (see [Environment Variables](#environment-variables))
+
+### Quick Start
+
+**Development:**
+```bash
+# Start all services (ZIP app + robot bridge)
+make dev
+# or
+docker-compose up
+
+# Start only ZIP app
+make dev:app
+
+# Start only robot bridge (optional - standalone PlatformIO service)
+make dev:robot
+```
+
+**Production:**
+```bash
+# Build production images
+make prod:build
+
+# Start production services
+make prod:up
+```
+
+### Services
+
+The Docker setup includes two services:
+
+1. **zip-app** (Next.js application)
+   - Port: 3000
+   - Health: `GET /api/health`
+   - Hot reloading in development
+
+2. **robot-bridge** (Standalone PlatformIO bridge server - optional)
+   - WebSocket: 8765
+   - HTTP: 8766
+   - Health: `GET /health`
+   - Serial port access for PlatformIO firmware communication
+   - See `robot/bridge/zip-robot-bridge/README.md` for details
 
 ### Development with Hot Reloading
 
-1. **Start the development container:**
+1. **Start the development services:**
    ```bash
+   make dev
+   # or
    docker-compose up
    ```
 
-2. **View logs in real-time:**
+2. **View logs:**
    ```bash
-   # Logs are shown by default, or use:
-   docker-compose logs -f
+   make dev:logs
+   # or for specific service
+   make dev:logs SERVICE=zip-app
+   make dev:logs SERVICE=robot-bridge
    ```
 
-3. **Access the application:**
-   Navigate to [http://localhost:3000](http://localhost:3000)
+3. **Access the services:**
+   - ZIP App: [http://localhost:3000](http://localhost:3000)
+   - Robot Bridge Health: [http://localhost:8766/health](http://localhost:8766/health)
 
 **Features:**
-- **Hot Reloading**: Code changes are automatically detected and the app reloads
-- **Console Logging**: All `console.log/error/warn` output is visible in Docker logs
+- **Hot Reloading**: Code changes automatically detected for both services
+- **Console Logging**: All output visible in Docker logs
 - **Data Persistence**: SQLite databases and logs persist in `./data` directory
-- **Volume Mounts**: Source code is mounted for instant changes, `node_modules` and `.next` use container versions
+- **Volume Mounts**: Source code mounted for instant changes
+- **Named Volumes**: `node_modules` and build caches persist for faster rebuilds
+- **Service Discovery**: Services communicate via Docker network
 
-**Stopping the container:**
+**Useful Commands:**
 ```bash
-docker-compose down
+# Open shell in container
+make dev:shell
+make dev:shell SERVICE=robot-bridge
+
+# Rebuild containers
+make dev:build
+
+# Check health
+make health
+
+# Clean up
+make dev:clean
 ```
 
 ### Production Deployment
 
-1. **Build the production image:**
+1. **Build production images:**
    ```bash
-   docker build -t zip-app .
+   make prod:build
+   # or
+   docker-compose -f docker-compose.prod.yml build
    ```
 
-2. **Run the production container:**
+2. **Start production services:**
    ```bash
-   docker run -p 3000:3000 \
-     -v $(pwd)/data:/app/data \
-     --env-file .env \
-     zip-app
+   make prod:up
+   # or
+   docker-compose -f docker-compose.prod.yml up -d
    ```
 
-   **Windows PowerShell:**
-   ```powershell
-   docker run -p 3000:3000 `
-     -v ${PWD}/data:/app/data `
-     --env-file .env `
-     zip-app
+3. **View logs:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml logs -f
    ```
+
+**Production Features:**
+- Multi-stage builds for optimized image sizes
+- Non-root users for security
+- Health checks with automatic restart
+- Resource limits (CPU/memory)
+- Structured JSON logging with rotation
+- Read-only filesystems where possible
 
 ### Docker Configuration
 
-- **Development**: Uses `Dockerfile.dev` with hot reloading via volume mounts
-- **Production**: Uses `Dockerfile` with multi-stage build for optimized image size
-- **Data Directory**: `./data` is mounted as a volume to persist databases and logs
-- **Environment Variables**: Loaded from `.env` file via `env_file` in docker-compose
+- **Development**: `docker-compose.yml` with hot reloading
+- **Production**: `docker-compose.prod.yml` with optimized builds
+- **ZIP App**: `Dockerfile.dev` (dev) and `Dockerfile` (prod)
+- **Robot Bridge**: `robot/bridge/zip-robot-bridge/Dockerfile.dev` (dev) and `Dockerfile` (prod)
+- **Data Directory**: `./data` mounted as volume for persistence
+- **Environment Variables**: Loaded from `.env` file
+- **Network**: `zip-network` bridge network for service discovery
+
+### Serial Port Configuration
+
+For robot bridge (optional standalone service) to access serial ports, configure in `docker-compose.yml`:
+
+**Linux:**
+```yaml
+devices:
+  - /dev/ttyUSB0:/dev/ttyUSB0
+```
+
+**Windows/WSL2:**
+```yaml
+devices:
+  - //./COM3:/dev/ttyUSB0
+```
+
+**Testing without hardware:**
+Set `LOOPBACK_MODE=true` in `.env` to enable loopback mode.
+
+### Comprehensive Documentation
+
+For detailed Docker documentation, see [docs/docker/README.md](docs/docker/README.md) which includes:
+- Complete architecture overview
+- Detailed setup instructions
+- Configuration options
+- Troubleshooting guide
+- Best practices
 
 ### Troubleshooting
 
 **Hot reloading not working:**
-- Ensure `WATCHPACK_POLLING=true` is set (already configured in docker-compose.yml)
-- On Windows, file watching may require polling mode (already enabled)
-- Check that volumes are mounted correctly: `docker-compose config`
+- Ensure `WATCHPACK_POLLING=true` is set (already configured)
+- Check volume mounts: `docker-compose config`
+- Restart containers: `docker-compose restart`
 
-**Console logs not visible:**
-- All logs are output to stdout/stderr by default
-- View logs with: `docker-compose logs -f`
-- Check individual service: `docker-compose logs -f app`
+**Serial port access issues:**
+- Verify device exists: `ls -l /dev/ttyUSB*` (Linux)
+- Check permissions: `sudo chmod 666 /dev/ttyUSB0`
+- Add user to dialout group: `sudo usermod -aG dialout $USER`
+- Use loopback mode for testing: `LOOPBACK_MODE=true`
 
-**Permission errors with data directory:**
-- Ensure `./data` directory exists: `mkdir -p data`
-- On Linux, you may need to adjust permissions: `chmod -R 777 data` (development only)
-- The container runs as non-root user in production for security
+**Service connectivity:**
+- Verify both services are running: `docker-compose ps`
+- Check network: `docker network inspect zip-network`
+- Robot bridge is optional - ZIP app works standalone
+- If using bridge: Verify environment: `NEXT_PUBLIC_ROBOT_BRIDGE_WS_URL=ws://robot-bridge:8765/robot`
+
+**Health checks failing:**
+- Check logs: `docker-compose logs zip-app`
+- Verify endpoints: `curl http://localhost:3000/api/health`
+- Increase health check start period if needed
 
 **Port already in use:**
-- Change the port mapping in `docker-compose.yml`: `"3001:3000"`
-- Or stop the conflicting service using port 3000
+- Change port mapping in `docker-compose.yml`: `"3001:3000"`
+- Or stop conflicting service
 
-**Native dependencies (better-sqlite3) build issues:**
-- Build dependencies are included in Dockerfiles (python3, make, g++)
-- If issues persist, the Dockerfiles use `node:20-alpine` which includes necessary tools
+**More help:**
+See [docs/docker/README.md](docs/docker/README.md) for comprehensive troubleshooting guide.
 
 
 ## Architecture Overview
@@ -567,6 +888,92 @@ Uploads a G-code file to the printer. Requires user confirmation.
 - `filename`: Filename that was uploaded
 - `message`: Status message
 
+### Robot Control Integration
+
+ZIP includes full integration with the ELEGOO Smart Robot Car V4.0 via the robot bridge server. The robot bridge translates WebSocket commands to ELEGOO-style JSON serial protocol for real-time motor control, sensor reading, and motion streaming.
+
+**LangGraph Orchestration Integration**: All robot tools are fully integrated with the LangGraph orchestration system. Robot-related requests are automatically routed through the AI Brain orchestration graph, and the system prompts include comprehensive guidelines for using robot tools appropriately. The AI assistant is explicitly aware of all 7 robot tools (3 READ-tier status tools and 4 ACT-tier motion tools) and will use them intelligently based on user requests.
+
+#### Robot Status Tools (READ tier)
+
+#### `get_robot_status` (READ)
+Returns robot connection status, bridge state, and streaming status.
+
+**Output:**
+- `connected`: Whether bridge is connected
+- `ready`: Whether robot is ready for commands
+- `streaming`: Whether motion streaming is active
+- `port`: Serial port path
+- `baud`: Baud rate
+
+#### `get_robot_diagnostics` (READ)
+Returns firmware diagnostics including motor states, reset count, and serial statistics.
+
+**Output:**
+- `owner`: Motion owner (Idle/Direct/Stopped)
+- `leftPwm`: Left motor PWM value (-255 to 255)
+- `rightPwm`: Right motor PWM value (-255 to 255)
+- `standby`: Motor driver standby status
+- `state`: Motion controller state
+- `resets`: Reset counter
+- `stats`: Serial statistics (rx, tx, parse errors)
+
+#### `get_robot_sensors` (READ)
+Returns robot sensor readings including ultrasonic distance, line sensors, and battery voltage.
+
+**Output:**
+- `ultrasonic`: Distance in cm (0-400)
+- `obstacle`: Obstacle detection status
+- `lineSensors`: Array of line sensor values [left, middle, right] (0-1023)
+- `batteryMv`: Battery voltage in millivolts
+
+#### Robot Motion Tools (ACT tier - require confirmation)
+
+#### `robot_move` (ACT)
+Moves the robot with specified velocity and turn rate. Requires user confirmation.
+
+**Input:**
+- `velocity`: Forward/backward velocity (-255 to 255, positive=forward)
+- `turnRate`: Turn rate (-255 to 255, positive=right)
+- `ttlMs`: Time-to-live in milliseconds (150-300ms recommended)
+
+**Output:**
+- `success`: Operation success status
+- `message`: Status message
+
+#### `robot_stop` (ACT)
+Immediately stops the robot. Emergency stop command. Requires user confirmation.
+
+**Output:**
+- `success`: Operation success status
+- `message`: Status message
+
+#### `robot_stream_start` (ACT)
+Starts continuous motion streaming to the robot. Requires user confirmation.
+
+**Input:**
+- `velocity`: Initial forward velocity (-255 to 255)
+- `turnRate`: Initial turn rate (-255 to 255)
+- `rateHz`: Streaming rate in Hz (default: 10, max: 20)
+- `ttlMs`: Time-to-live per setpoint (default: 200ms)
+
+**Output:**
+- `success`: Operation success status
+- `streaming`: Whether streaming was started
+- `message`: Status message
+
+#### `robot_stream_stop` (ACT)
+Stops motion streaming to the robot. Requires user confirmation.
+
+**Input:**
+- `hardStop`: Whether to send hard stop command (default: true)
+
+**Output:**
+- `success`: Operation success status
+- `message`: Status message
+
+### Calendar Integration (Placeholder)
+
 #### `calendar_create_event` (ACT)
 Creates a calendar event (integration not configured - returns placeholder message).
 
@@ -592,6 +999,83 @@ Lists calendar events (integration not configured - returns placeholder message)
 - `message`: "Calendar integration not configured..."
 - `events`: []
 
+## Robot Bridge Server
+
+ZIP includes a robot bridge server for communicating with the ELEGOO Smart Robot Car V4.0 running custom firmware. The bridge server is completely independent and optional - the ZIP application works perfectly without it.
+
+### Bridge Server Overview
+
+The robot bridge server (`robot/bridge/zip-robot-bridge/`) is a Node.js service that:
+
+- **Translates WebSocket to Serial**: Bridges WebSocket connections to serial port communication
+- **ELEGOO JSON Protocol**: Implements ELEGOO-style JSON commands with tag-based response matching
+- **Handshake State Machine**: Proper boot marker detection and hello handshake
+- **Setpoint Streaming**: Rate-limited streaming (10-20Hz) with TTL safety
+- **Priority Queue**: Stop commands always preempt other commands
+- **Loopback Mode**: Test mode for development without hardware
+
+### Quick Start
+
+**1. Install bridge dependencies:**
+```bash
+cd robot/bridge/zip-robot-bridge
+npm install
+```
+
+**2. Configure environment:**
+```bash
+# Create .env file in robot/bridge/zip-robot-bridge/
+SERIAL_PORT=COM3  # or /dev/ttyUSB0 on Linux
+SERIAL_BAUD=115200
+WS_PORT=8765
+HTTP_PORT=8766
+LOOPBACK_MODE=false  # Set to true for testing without hardware
+```
+
+**3. Start bridge server:**
+```bash
+npm run dev:local
+# or for production
+npm run build:local
+npm start
+```
+
+**4. Access bridge:**
+- WebSocket: `ws://localhost:8765/robot`
+- HTTP Health: `http://localhost:8766/health`
+- Diagnostics UI: `http://localhost:8766/`
+
+### Firmware
+
+The bridge server communicates with custom firmware located in `robot/firmware/zip_robot_uno/`:
+
+- **Platform**: Arduino UNO (ATmega328P)
+- **Framework**: Arduino
+- **Protocol**: ELEGOO-style JSON commands (`{"N":200,"H":"tag","D1":v,"D2":w,"T":ttl}`)
+- **Motion Control**: Differential mixing, slew limiting, deadman TTL safety
+- **Sensors**: Ultrasonic, line sensors, battery voltage
+- **Documentation**: See `robot/firmware/zip_robot_uno/README.md` for firmware details
+
+### Bridge Server Features
+
+- **WebSocket Server**: Real-time bidirectional communication
+- **Serial Manager**: Automatic port detection with boot marker detection
+- **FIFO Reply Matching**: Deterministic response correlation via tag matching
+- **Setpoint Streaming**: Coalesced streaming with rate limiting (max 20Hz)
+- **Priority Queue**: Stop commands (N=201) always preempt queue
+- **Health Endpoints**: HTTP endpoints for status and diagnostics (`/health`)
+- **Loopback Mode**: Test mode for development without hardware
+
+### Documentation
+
+For complete bridge server documentation, see:
+- **Bridge Server**: `robot/bridge/zip-robot-bridge/README.md`
+- **Firmware**: `robot/firmware/zip_robot_uno/README.md`
+- **Protocol**: `robot/firmware/zip_robot_uno/protocol.md`
+
+### Integration Note
+
+The bridge server is **optional** and **standalone**. The ZIP application does not include any robot control tools or UI components. The bridge server can be used independently for PlatformIO-based robot projects.
 
 ## AI Capabilities
 
@@ -943,6 +1427,10 @@ Tests 20 scripted prompts to ensure:
 | `ZIP_VOICE_FALLBACK_ENABLED` | Enable STT/TTS fallback | `true` |
 | `ZIP_UPDATE_INTERVAL_MS` | Panel update interval | `2000` |
 | `PRINTER_API_URL` | 3D printer API base URL (Moonraker/Klipper) | `http://169.254.178.90` |
+| `NEXT_PUBLIC_ROBOT_BRIDGE_WS_URL` | Robot bridge WebSocket URL | `ws://localhost:8765/robot` |
+| `ROBOT_SERIAL_PORT` | Robot serial port (bridge server) | auto-detect |
+| `SERIAL_BAUD` | Serial baud rate (bridge server) | `115200` |
+| `LOOPBACK_MODE` | Enable loopback mode for testing (bridge server) | `false` |
 
 ### Required Configuration
 
@@ -971,6 +1459,15 @@ ZIP uses **Open-Meteo** for weather data - a free, open-source weather API with 
 - **PRINTER_API_URL**: 3D printer API base URL for Moonraker/Klipper integration (default: `http://169.254.178.90`)
   - Must be a local network address (localhost, 169.254.x.x, or private IP ranges)
   - Example: `PRINTER_API_URL=http://192.168.1.100`
+- **NEXT_PUBLIC_ROBOT_BRIDGE_WS_URL**: Robot bridge WebSocket URL for ZIP app connection
+  - Default: `ws://localhost:8765/robot` (local development)
+  - Docker: `ws://robot-bridge:8765/robot` (service discovery)
+- **ROBOT_SERIAL_PORT**: Serial port for robot bridge (auto-detected if not set)
+  - Windows: `COM5`, `COM3`, etc.
+  - Linux: `/dev/ttyUSB0`
+  - macOS: `/dev/tty.usbserial-*`
+- **LOOPBACK_MODE**: Enable loopback mode for robot bridge testing without hardware
+  - Set to `true` for development without robot hardware
 
 ## Security
 
@@ -1078,10 +1575,12 @@ zip/
 │   │   └── tools/         # Tool endpoints
 │   └── (hud)/             # HUD page
 ├── components/             # React components
-│   └── hud/               # HUD-specific components
+│   ├── hud/               # HUD-specific components
+│   └── robot/             # Robot control UI components
 ├── hooks/                 # React hooks
 │   ├── useChat.ts         # Chat hook
 │   ├── useRealtime.ts     # Realtime hook
+│   ├── useRobot.ts        # Robot bridge hook
 │   ├── usePanelUpdates.ts # Panel update hook
 │   ├── usePanelContext.ts # Panel context hook
 │   └── useTTS.ts          # TTS fallback hook
@@ -1105,10 +1604,14 @@ zip/
 │   │   └── utils/         # Orchestration utilities (context-filter, activity-tracker, etc.)
 │   ├── projector/         # Projector mode provider
 │   │   └── projector-provider.tsx # Projector mode context and state management
+│   ├── robot/             # Robot client integration
+│   │   ├── client.ts      # Browser WebSocket client
+│   │   ├── server-client.ts # Server-side HTTP client
+│   │   └── types.ts       # Robot type definitions
 │   ├── tools/             # Tool registry and executor
 │   │   ├── registry.ts    # Tool registry
 │   │   ├── executor.ts    # Tool executor
-│   │   └── implementations/ # Tool implementations
+│   │   └── implementations/ # Tool implementations (includes robot/)
 │   ├── middleware/        # Rate limiting
 │   ├── integrations/      # MCP router interface
 │   ├── voice/            # Voice system
@@ -1127,6 +1630,12 @@ zip/
 │   ├── test-context-filter.ts # Context filtering tests
 │   ├── test-context-filter-relevant.ts # Context filter relevance tests
 │   └── test-embedding-connection.ts # Embedding connection tests
+├── robot/                 # Robot integration
+│   ├── bridge/            # Robot bridge server (standalone service)
+│   │   └── zip-robot-bridge/ # Node.js WebSocket to serial bridge
+│   ├── firmware/          # Arduino/PlatformIO firmware
+│   │   └── zip_robot_uno/ # ELEGOO Smart Robot Car firmware
+│   └── tools/             # Robot testing utilities
 └── data/                  # Runtime data (created automatically)
     ├── audit.log          # Audit logs
     ├── traces/            # Trace files
@@ -1178,9 +1687,10 @@ zip/
 
 **✅ Production Ready**: ZIP is fully functional and production-ready with:
 - Complete voice and text interaction support
-- Comprehensive tool ecosystem (20+ tools including 11 3D printer tools)
+- Comprehensive tool ecosystem (39 tools including 11 3D printer tools and 7 robot tools)
 - Advanced AI orchestration with intelligent routing (LangGraph v1 StateGraph)
 - Full 3D printer integration (Neptune 4 Pro / Moonraker/Klipper) with LangGraph orchestration
+- Full robot integration (ELEGOO Smart Robot Car V4.0) with motion control and sensors
 - Full observability and security features
 - Docker deployment support
 

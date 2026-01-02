@@ -7,7 +7,9 @@ import { checkRateLimit } from "@/lib/middleware/rate-limit";
 export const dynamic = "force-dynamic";
 
 const requestSchema = z.object({
-  imageBase64: z.string(),
+  imageBase64: z.string().optional(),
+  imageUrl: z.string().optional(),
+  source: z.enum(["webcam", "upload"]).optional().default("webcam"),
   prompt: z.string().optional(),
 });
 
