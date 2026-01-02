@@ -1,199 +1,150 @@
-# ZIP - Jarvis-style HUD Assistant
+# ZIP Robot
 
-A Jarvis-style HUD assistant built with Next.js, TypeScript, and Tailwind CSS. ZIP provides a voice and text interface with OpenAI Realtime integration, tool calling, and an event-driven architecture.
+ZIP is an AI-powered robot built on the ELEGOO Smart Robot Car V4.0 platform, featuring voice control, computer vision, and autonomous capabilities through a Jarvis-style HUD interface.
+
+## Overview
+
+ZIP combines custom Arduino firmware, a WebSocket bridge server, and a Next.js HUD interface to create an intelligent robot that can be controlled through voice commands, text chat, or autonomous AI orchestration.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         ZIP HUD                                  │
+│              (Next.js + OpenAI Realtime Voice)                  │
+│                    http://localhost:3000                         │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │ WebSocket
+┌─────────────────────────▼───────────────────────────────────────┐
+│                      Robot Bridge                                │
+│                  ws://localhost:8765/robot                       │
+│              (WebSocket ↔ Serial Translation)                    │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │ Serial (115200 baud)
+┌─────────────────────────▼───────────────────────────────────────┐
+│                     ZIP Robot Firmware                           │
+│              (Arduino UNO + ELEGOO Shield)                       │
+│         Motors • Sensors • Servos • IMU • Camera                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Features
 
-- **🎤 Realtime Voice Interface**: Low-latency voice interactions via OpenAI Realtime WebRTC with barge-in support
-- **🤖 AI Orchestration**: Intelligent request routing with research and workflow sub-graphs
-- **💬 Multi-Modal Interaction**: Voice, text chat, and vision (webcam analysis) support
-- **🧠 Memory System**: User-controlled pinned memory with natural language commands
-- **📚 Document Intelligence**: PDF ingestion, vector search, and Q&A with citations
-- **🌐 Web Research**: Automated research pipeline with source validation and citations
-- **📝 Notes & Timers**: Full CRUD operations for notes and server-side timer reminders
-- **🤖 Robot Control**: ELEGOO Smart Robot Car V4.0 integration via WebSocket bridge
-- **🖨️ 3D Printer Control**: Moonraker/Klipper printer integration
-- **🔒 Security**: Permission-based tool access, input validation, and audit logging
-- **📊 Observability**: Comprehensive tracing, audit logs, and request tracking
+### Robot Hardware
+- **ELEGOO Smart Robot Car V4.0** base platform
+- **Arduino UNO R3** with SmartCar-Shield-v1.1
+- **TB6612FNG** dual H-bridge motor driver
+- **MPU6050** IMU for orientation sensing
+- **Ultrasonic sensor** for distance measurement
+- **Line tracking sensors** for navigation
+- **Servo-mounted sensor head** for scanning
+- **ESP32-CAM** module for robot vision (in development)
+
+### AI Capabilities
+- **Voice Control**: Natural language commands via OpenAI Realtime
+- **Autonomous Navigation**: AI-driven motion planning
+- **Computer Vision**: Image analysis and object detection
+- **Memory System**: Remembers commands and context
+- **Tool Orchestration**: Chains multiple operations intelligently
+
+### HUD Interface
+- **Real-time Telemetry**: Motor states, sensor readings, battery voltage
+- **Motion Control**: Velocity/turn rate joystick and presets
+- **Sensor Display**: Live ultrasonic, line sensor, and IMU data
+- **Serial Console**: Direct firmware communication
+- **Voice & Chat**: Multiple interaction modes
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Agent Guide](AGENT_GUIDE.md) | Quick reference for AI agents |
-| [Agent Onboarding](docs/agents/README.md) | Getting started for agents |
-| [Architecture Guide](docs/agents/architecture.md) | System architecture details |
-| [Development Workflow](docs/agents/development-workflow.md) | How to work on tasks |
-| [Docker Guide](docs/docker/README.md) | Docker deployment documentation |
-| [Windows Serial Port](docs/docker/WINDOWS_SERIAL_PORT.md) | Serial port setup on Windows |
 | [Robot Firmware](robot/firmware/zip_robot_uno/README.md) | Arduino firmware documentation |
 | [Robot Bridge](robot/bridge/zip-robot-bridge/README.md) | WebSocket bridge server |
+| [Motion Control](robot/ELEGOO_MOTION_CONTROL.md) | Motion system details |
+| [Docker Guide](docs/docker/README.md) | Docker deployment |
+| [Architecture](docs/agents/architecture.md) | System architecture |
 
-## Quickstart
+## Quick Start
 
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+### 1. Flash the Robot Firmware
 
-2. **Set up environment variables:**
-   ```bash
-   cp example-env .env
-   # Edit .env and add your OPENAI_API_KEY
-   ```
-
-3. **Run the development server:**
-   ```bash
-   npm run dev
-   ```
-
-4. **Open your browser:**
-   Navigate to [http://localhost:3000](http://localhost:3000)
-
-## Local Development
-
-ZIP can be run as two independent services locally. This setup is useful for development and debugging.
-
-### Prerequisites
-
-- Node.js 18+
-- npm or yarn
-- `.env` file configured (see [Environment Variables](#environment-variables))
-- Serial port available (if using robot bridge) or `LOOPBACK_MODE=true` for testing
-
-### Service Architecture
-
-1. **zip-app** (Next.js application)
-   - Port: 3000
-   - Health: `GET /api/health`
-
-2. **robot-bridge** (Optional - Robot communication bridge)
-   - WebSocket: 8765
-   - HTTP: 8766
-   - Health: `GET /health`
-
-### Running Services
-
-**Terminal 1 - ZIP App:**
 ```bash
-npm run dev:local
+cd robot/firmware/zip_robot_uno
+pio run -t upload
 ```
 
-**Terminal 2 - Robot Bridge (Optional):**
+### 2. Start the Bridge Server
+
 ```bash
-npm run dev:bridge
+cd robot/bridge/zip-robot-bridge
+npm install
+npm run dev
 ```
 
-### Available Scripts
+### 3. Start the HUD
 
-| Script | Description |
-|--------|-------------|
-| `npm run dev:local` | Start ZIP app in development mode |
-| `npm run dev:bridge` | Start robot bridge in development mode |
-| `npm run build:local` | Build ZIP app for production |
-| `npm run build:bridge` | Build robot bridge for production |
-| `npm run test:local` | Run full test suite |
-| `npm run test:health` | Health check both services |
-| `npm run test:integration` | Integration tests between services |
-| `npm run typecheck` | TypeScript type checking |
-| `npm run lint` | Run ESLint |
-| `npm run test:e2e` | Run Playwright E2E tests |
-
-## Docker Deployment
-
-ZIP can be run in Docker with hot reloading for development and optimized builds for production.
-
-### Quick Start
-
-**Development:**
 ```bash
-make dev
-# or
-docker-compose up
+npm install
+cp example-env .env
+# Add your OPENAI_API_KEY to .env
+npm run dev
 ```
 
-**Production:**
-```bash
-make prod:build
-make prod:up
-```
+### 4. Open the HUD
 
-For detailed Docker documentation, see [docs/docker/README.md](docs/docker/README.md).
+Navigate to [http://localhost:3000](http://localhost:3000)
 
-## Architecture Overview
-
-### Event-Driven Architecture
-
-ZIP uses a typed event bus system where all UI state changes flow through events:
+## Project Structure
 
 ```
-User Input → Event Bus → State Reducer → UI Updates
-                ↓
-         Tool Executor → OpenAI API → Tool Results → Panel Updates
+zip/
+├── robot/
+│   ├── firmware/
+│   │   ├── zip_robot_uno/      # Arduino UNO firmware
+│   │   └── zip_esp32_cam/      # ESP32-CAM firmware (in development)
+│   ├── bridge/
+│   │   └── zip-robot-bridge/   # WebSocket-to-Serial bridge
+│   └── tools/                  # Testing and diagnostic utilities
+├── app/                        # Next.js HUD application
+│   ├── api/                    # API routes
+│   ├── (hud)/                  # Main HUD page
+│   └── robot/                  # Robot control page
+├── components/
+│   ├── hud/                    # HUD UI components
+│   └── robot/                  # Robot control components
+├── lib/
+│   ├── robot/                  # Robot client libraries
+│   ├── orchestrators/          # AI orchestration
+│   ├── tools/                  # Tool implementations
+│   └── openai/                 # OpenAI integration
+└── docs/                       # Documentation
 ```
 
-### Core Systems
+## Robot Tools
 
-| System | Location | Description |
-|--------|----------|-------------|
-| Event Bus | `lib/events/` | Typed event system for all UI state changes |
-| State Machine | `lib/state/hudStore.ts` | HUD reducer managing Zip states |
-| Tool Registry | `lib/tools/registry.ts` | Whitelisted tools with Zod schemas |
-| Tool Executor | `lib/tools/executor.ts` | Executor with permissions, audit, tracing |
-| AI Orchestration | `lib/orchestrators/brain.ts` | LangGraph-based orchestration system |
-| Memory | `lib/memory/` | SQLite-based pinned memory |
-| Observability | `lib/observability/` | Tracing and audit logging |
+The AI can control the robot through these tools:
 
-### OpenAI Integration
+| Tool | Tier | Description |
+|------|------|-------------|
+| `get_robot_status` | READ | Connection status and bridge state |
+| `get_robot_diagnostics` | READ | Motor states, reset count, serial stats |
+| `get_robot_sensors` | READ | Ultrasonic, line sensors, battery voltage |
+| `robot_move` | ACT | Move with velocity and turn rate |
+| `robot_stop` | ACT | Emergency stop |
+| `robot_stream_start` | ACT | Start continuous motion streaming |
+| `robot_stream_stop` | ACT | Stop motion streaming |
 
-ZIP uses a two-model approach:
+## Firmware Commands
 
-1. **Realtime Model**: Low-latency voice interactions via WebRTC
-2. **Responses Model**: Stronger reasoning for planning and tool calling
+The firmware uses ELEGOO-style JSON protocol:
 
-## Tool Registry
+| Command | N | Description |
+|---------|---|-------------|
+| Hello | 0 | Handshake/ping |
+| Setpoint | 200 | Streaming motion (velocity, turn rate, TTL) |
+| Stop | 201 | Immediate stop |
+| Diagnostics | 120 | Debug state dump |
+| Direct Motor | 999 | Raw PWM control |
 
-### Permission Tiers
-
-| Tier | Description | Example Tools |
-|------|-------------|---------------|
-| READ | Safe read-only operations | `get_system_stats`, `get_weather`, `web_search` |
-| WRITE | Data modification | `create_note`, `ingest_document` |
-| ACT | Requires user confirmation | `open_url`, `create_timer`, `robot_move` |
-| ADMIN | Administrative operations | (reserved) |
-
-### Available Tools (39 total)
-
-**System & Info (READ)**
-- `get_system_stats` - CPU, RAM, Disk usage
-- `get_weather` - Weather with forecast and air quality
-- `get_uptime` - System uptime and session stats
-
-**Web & Research (READ)**
-- `web_search` - Search the web for current information
-- `fetch_url` - Fetch and extract content from URLs
-- `summarize_sources` - Summarize multiple sources with citations
-
-**Documents (READ/WRITE)**
-- `ingest_document` - Ingest PDFs and text documents
-- `doc_search` - Vector search across documents
-- `doc_answer` - Answer questions from documents
-
-**Notes & Timers (READ/WRITE/ACT)**
-- `create_note`, `list_notes`, `search_notes`, `delete_note`
-- `create_timer`, `cancel_timer`
-
-**Vision (READ/ACT)**
-- `analyze_image` - Analyze images using vision AI
-- `set_camera_enabled` - Toggle camera state
-
-**3D Printer (READ/ACT)** - 11 tools
-- Status: `get_printer_status`, `get_printer_temperature`, `get_print_progress`, `list_printer_files`
-- Control: `start_print`, `pause_print`, `resume_print`, `cancel_print`, `set_temperature`, `home_axes`, `move_axis`
-
-**Robot Control (READ/ACT)** - 7 tools
-- Status: `get_robot_status`, `get_robot_diagnostics`, `get_robot_sensors`
-- Motion: `robot_move`, `robot_stop`, `robot_stream_start`, `robot_stream_stop`
+See [robot/firmware/zip_robot_uno/README.md](robot/firmware/zip_robot_uno/README.md) for full protocol documentation.
 
 ## Environment Variables
 
@@ -201,160 +152,129 @@ ZIP uses a two-model approach:
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key |
+| `OPENAI_API_KEY` | OpenAI API key for voice and AI features |
 
-### Optional
+### Robot Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENAI_REALTIME_MODEL` | `gpt-4o-realtime-preview-2024-12-17` | Realtime model |
-| `OPENAI_RESPONSES_MODEL` | `gpt-4o` | Responses API model |
-| `OPENAI_VISION_MODEL` | `gpt-4o` | Vision API model |
-| `OPENAI_TTS_MODEL` | `gpt-4o-mini-tts-2025-12-15` | TTS model |
-| `OPENAI_STT_MODEL` | `whisper-1` | STT model |
-| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
-| `ZIP_REALTIME_ENABLED` | `true` | Enable Realtime WebRTC |
-| `ZIP_VOICE_FALLBACK_ENABLED` | `true` | Enable STT/TTS fallback |
+| `NEXT_PUBLIC_ROBOT_BRIDGE_WS_URL` | `ws://localhost:8765/robot` | Bridge WebSocket URL |
+| `SERIAL_PORT` | auto-detect | Serial port (COM5, /dev/ttyUSB0) |
+| `SERIAL_BAUD` | `115200` | Serial baud rate |
+| `LOOPBACK_MODE` | `false` | Test mode without hardware |
+
+### HUD Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENAI_REALTIME_MODEL` | `gpt-4o-realtime-preview-2024-12-17` | Voice model |
+| `OPENAI_RESPONSES_MODEL` | `gpt-4o` | Chat/reasoning model |
+| `ZIP_REALTIME_ENABLED` | `true` | Enable voice interface |
 | `ZIP_UPDATE_INTERVAL_MS` | `2000` | Panel update interval |
-| `PRINTER_API_URL` | `http://169.254.178.90` | 3D printer API URL |
-| `NEXT_PUBLIC_ROBOT_BRIDGE_WS_URL` | `ws://localhost:8765/robot` | Robot bridge WebSocket |
-| `LOOPBACK_MODE` | `false` | Enable loopback mode for testing |
-
-## API Endpoints
-
-### Agent & Chat
-- `POST /api/agent` - Main agent endpoint with tool calling
-
-### Realtime Voice
-- `GET /api/realtime/token` - Get ephemeral token for WebRTC
-- `POST /api/realtime/bridge` - Bridge voice to orchestration
-
-### Voice Fallback
-- `POST /api/voice/transcribe` - STT using Whisper
-- `POST /api/voice/speak` - TTS synthesis
-
-### Memory
-- `GET /api/memory/get` - Get memories
-- `POST /api/memory/add` - Add memory
-- `DELETE /api/memory/delete` - Delete memory
-
-### Notes
-- `POST /api/notes/create` - Create note
-- `GET /api/notes/list` - List notes
-- `POST /api/notes/search` - Search notes
-- `DELETE /api/notes/delete` - Delete note
-
-### Tools
-- `POST /api/tools/web_search` - Web search
-- `POST /api/tools/fetch_url` - Fetch URL content
-- `POST /api/tools/vision` - Analyze image
-- `POST /api/tools/docs/*` - Document operations
-
-## Project Structure
-
-```
-zip/
-├── app/                    # Next.js app directory
-│   ├── api/               # API routes
-│   └── (hud)/             # HUD page
-├── components/             # React components
-│   ├── hud/               # HUD-specific components
-│   └── robot/             # Robot control UI
-├── hooks/                  # React hooks
-├── lib/                    # Core libraries
-│   ├── events/            # Event bus system
-│   ├── orchestrators/     # AI orchestration
-│   ├── tools/             # Tool registry and executor
-│   ├── robot/             # Robot client
-│   ├── memory/            # Memory management
-│   └── observability/     # Tracing and audit
-├── robot/                  # Robot integration
-│   ├── bridge/            # WebSocket bridge server
-│   └── firmware/          # Arduino firmware
-├── scripts/                # Utility scripts
-├── docs/                   # Documentation
-│   ├── agents/            # Agent guides
-│   └── docker/            # Docker documentation
-└── data/                   # Runtime data (auto-created)
-```
 
 ## Testing
 
-### E2E Tests
+### Firmware Tests
+
 ```bash
+cd robot/firmware/zip_robot_uno/tools
+
+# Motor bringup test
+node serial_motor_bringup.js COM5
+
+# Hardware smoke test
+node hardware_smoke.js COM5
+
+# Motion-only test (safe 0.5ft radius)
+node serial_motor_bringup.js COM5 --motion-only
+```
+
+### Bridge Tests
+
+```bash
+cd robot/bridge/zip-robot-bridge
+
+# Health check
+npm run test:health
+
+# Integration tests
+npm run test:integration
+```
+
+### HUD Tests
+
+```bash
+# E2E tests
 npm run test:e2e
+
+# Type checking
+npm run typecheck
 ```
 
-### Orchestration Tests
-```bash
-# Start dev server first
-npm run dev
+## Hardware Setup
 
-# In another terminal
-npx tsx scripts/test-api-orchestration.ts
-```
+### Components
 
-### Eval Harness
-```bash
-npx tsx scripts/eval-harness.ts
-```
+- ELEGOO Smart Robot Car V4.0 kit
+- Arduino UNO R3
+- SmartCar-Shield-v1.1 (TB6612FNG motor driver)
+- HC-SR04 ultrasonic sensor
+- SG90 servo for sensor head
+- MPU6050 IMU module
+- ESP32-CAM module (optional, for vision)
 
-## Security
+### Wiring
 
-- **API Key Protection**: All OpenAI calls server-side
-- **Input Validation**: Zod schemas for all inputs
-- **Permission Tiers**: READ/WRITE/ACT/ADMIN access control
-- **URL Sanitization**: Rejects unsafe protocols
-- **Rate Limiting**: In-memory rate limiter (100 req/min default)
-- **Audit Logging**: All tool calls logged to `./data/audit.log`
+The firmware is configured for the standard ELEGOO shield pinout:
 
-## Contributing
+| Component | Pins |
+|-----------|------|
+| Left Motor | D5 (PWM), D8/D9 (DIR) |
+| Right Motor | D6 (PWM), D10/D11 (DIR) |
+| Ultrasonic | D13 (Trig), D12 (Echo) |
+| Servo | D10 |
+| Motor Standby | D3 |
+| Line Sensors | A0, A1, A2 |
+| Battery | A3 |
 
-### For AI Agents
+See [robot/firmware/zip_robot_uno/README.md](robot/firmware/zip_robot_uno/README.md) for detailed pin mapping.
 
-This project is configured for AI agent collaboration:
-
-- **[Agent Guide](AGENT_GUIDE.md)** - Quick reference
-- **[GitHub Copilot Instructions](.github/copilot-instructions.md)** - Copilot guide
-- **Issue Templates** - `.github/ISSUE_TEMPLATE/`
-
-### For Developers
-
-1. Fork the repository
-2. Create a feature branch
-3. Make changes following the patterns in `.cursorrules`
-4. Run `npm run typecheck` and `npm run lint`
-5. Submit a pull request
-
-## Current Status
+## Development Status
 
 **Version**: 0.1.0
 
-**Features Complete**:
-- ✅ Voice and text interaction
-- ✅ 39 tools with permission-based access
-- ✅ AI orchestration with intelligent routing
-- ✅ 3D printer integration (Moonraker/Klipper)
-- ✅ Robot integration (ELEGOO Smart Robot Car V4.0)
-- ✅ Document intelligence with vector search
-- ✅ Web research with citations
-- ✅ Memory system
-- ✅ Audit logging and tracing
-- ✅ Docker deployment support
+### Completed
+- ✅ Arduino firmware with motion control
+- ✅ WebSocket bridge server
+- ✅ HUD with real-time telemetry
+- ✅ Voice control integration
+- ✅ AI tool orchestration for robot commands
+- ✅ Sensor reading and display
+- ✅ IMU integration (MPU6050)
+- ✅ Drive safety layer (battery-aware, deadband, ramping)
 
-**In Development**:
+### In Development
 - 🔄 ESP32-CAM integration for robot vision
-- 🔄 Additional robot motion capabilities
+- 🔄 Autonomous navigation modes
+- 🔄 Path planning and mapping
 
-## Technology Stack
+## Additional HUD Features
 
-**Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS, Three.js
+The ZIP HUD also includes non-robot features:
 
-**Backend**: Next.js API Routes, OpenAI API, SQLite, Zod
+- **3D Printer Control**: Moonraker/Klipper integration (11 tools)
+- **Document Intelligence**: PDF ingestion and Q&A
+- **Web Research**: Automated research with citations
+- **Notes & Timers**: Personal productivity tools
+- **Memory System**: Persistent AI memory
 
-**AI & Orchestration**: LangGraph, LangChain, OpenAI Embeddings
+## Contributing
 
-**Robot**: PlatformIO, Arduino, WebSocket bridge
+1. Fork the repository
+2. Create a feature branch
+3. Follow patterns in `.cursorrules`
+4. Run `npm run typecheck` and `npm run lint`
+5. Submit a pull request
 
 ## License
 
