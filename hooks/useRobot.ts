@@ -1,10 +1,12 @@
 "use client";
 
 /**
- * useRobot - React hook for robot state management
+ * useRobot - React hook for robot state management (WiFi version)
  * 
  * Provides real-time robot state, connection management, and command functions
  * for use in both the compact HUD panel and full diagnostics page.
+ * 
+ * Communication is via HTTP to ESP32, which forwards to UNO via Serial2.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -13,8 +15,9 @@ import type {
   RobotDiagnostics,
   RobotSensors,
   RobotConnectionState,
-  RobotHealthResponse,
+  RobotStatusResponse,
 } from "@/lib/robot/types";
+import type { WiFiStatusResponse } from "@/lib/robot/wifi-client";
 
 export interface UseRobotOptions {
   /**
@@ -44,7 +47,7 @@ export interface UseRobotReturn {
   // Connection
   connect: () => void;
   disconnect: () => void;
-  checkHealth: () => Promise<RobotHealthResponse | null>;
+  checkHealth: () => Promise<WiFiStatusResponse | null>;
   
   // Commands
   stop: () => Promise<void>;
@@ -53,16 +56,13 @@ export interface UseRobotReturn {
   setServo: (angle: number) => Promise<void>;
   
   // Streaming
-  startStreaming: (v: number, w: number, options?: { rateHz?: number; ttlMs?: number }) => Promise<void>;
+  startStreaming: (v: number, w: number, options?: { rateHz?: number; ttlMs?: number }) => void;
   updateStreaming: (v: number, w: number) => void;
-  stopStreaming: (hardStop?: boolean) => Promise<void>;
+  stopStreaming: (hardStop?: boolean) => void;
   
   // Data
   getDiagnostics: () => Promise<RobotDiagnostics | null>;
   getSensors: () => Promise<RobotSensors>;
-  
-  // Serial console
-  clearSerialLog: () => void;
 }
 
 export function useRobot(options: UseRobotOptions = {}): UseRobotReturn {
@@ -73,6 +73,7 @@ export function useRobot(options: UseRobotOptions = {}): UseRobotReturn {
   } = options;
   
   const [state, setState] = useState<RobotState>(robotClient.getState());
+  const [isStreaming, setIsStreaming] = useState(false);
   const sensorPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const diagnosticsPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -93,13 +94,12 @@ export function useRobot(options: UseRobotOptions = {}): UseRobotReturn {
     
     return () => {
       // Don't disconnect on unmount - other components may be using it
-      // robotClient.disconnect();
     };
   }, [autoConnect]);
 
   // Sensor polling
   useEffect(() => {
-    if (sensorPollingMs > 0 && state.connection === "ready") {
+    if (sensorPollingMs > 0 && state.connection === "connected") {
       sensorPollingRef.current = setInterval(async () => {
         try {
           await getSensors();
@@ -119,7 +119,7 @@ export function useRobot(options: UseRobotOptions = {}): UseRobotReturn {
 
   // Diagnostics polling
   useEffect(() => {
-    if (diagnosticsPollingMs > 0 && state.connection === "ready") {
+    if (diagnosticsPollingMs > 0 && state.connection === "connected") {
       diagnosticsPollingRef.current = setInterval(async () => {
         try {
           await robotClient.getDiagnostics();
@@ -146,19 +146,18 @@ export function useRobot(options: UseRobotOptions = {}): UseRobotReturn {
     robotClient.disconnect();
   }, []);
 
-  const checkHealth = useCallback(async (): Promise<RobotHealthResponse | null> => {
+  const checkHealth = useCallback(async (): Promise<WiFiStatusResponse | null> => {
     return robotClient.checkHealth();
   }, []);
 
   // Command functions
   const stop = useCallback(async (): Promise<void> => {
+    setIsStreaming(false);
     await robotClient.stop();
   }, []);
 
   const move = useCallback(async (v: number, w: number): Promise<void> => {
     // Convert v (forward velocity) and w (turn rate) to L/R motor values
-    // v: positive = forward, negative = backward
-    // w: positive = turn right (left faster), negative = turn left (right faster)
     const left = Math.max(-255, Math.min(255, Math.round(v + w)));
     const right = Math.max(-255, Math.min(255, Math.round(v - w)));
     await robotClient.directMotor(left, right);
@@ -173,20 +172,22 @@ export function useRobot(options: UseRobotOptions = {}): UseRobotReturn {
   }, []);
 
   // Streaming functions
-  const startStreaming = useCallback(async (
+  const startStreaming = useCallback((
     v: number, 
     w: number, 
     streamOptions?: { rateHz?: number; ttlMs?: number }
-  ): Promise<void> => {
-    await robotClient.startStreaming(v, w, streamOptions);
+  ): void => {
+    setIsStreaming(true);
+    robotClient.startStreaming(v, w, streamOptions);
   }, []);
 
   const updateStreaming = useCallback((v: number, w: number): void => {
     robotClient.updateStreaming(v, w);
   }, []);
 
-  const stopStreaming = useCallback(async (hardStop = true): Promise<void> => {
-    await robotClient.stopStreaming(hardStop);
+  const stopStreaming = useCallback((hardStop = true): void => {
+    setIsStreaming(false);
+    robotClient.stopStreaming(hardStop);
   }, []);
 
   // Data functions
@@ -195,57 +196,15 @@ export function useRobot(options: UseRobotOptions = {}): UseRobotReturn {
   }, []);
 
   const getSensors = useCallback(async (): Promise<RobotSensors> => {
-    const now = Date.now();
-    
-    // Fetch all sensors in parallel
-    const [distance, left, middle, right, battery] = await Promise.all([
-      robotClient.getUltrasonic("distance").catch(() => 0),
-      robotClient.getLineSensor("left").catch(() => 0),
-      robotClient.getLineSensor("middle").catch(() => 0),
-      robotClient.getLineSensor("right").catch(() => 0),
-      robotClient.getBattery().catch(() => 0),
-    ]);
-
-    // Calculate battery percentage (7.4V 2S LiPo: 6.0V=0%, 8.4V=100%)
-    const batteryVoltage = battery as number;
-    const batteryPercent = Math.max(0, Math.min(100, 
-      ((batteryVoltage - 6000) / (8400 - 6000)) * 100
-    ));
-
-    const sensors: RobotSensors = {
-      ultrasonic: {
-        distance: distance as number,
-        obstacle: (distance as number) > 0 && (distance as number) <= 20,
-        timestamp: now,
-      },
-      lineSensor: {
-        left: left as number,
-        middle: middle as number,
-        right: right as number,
-        timestamp: now,
-      },
-      battery: {
-        voltage: batteryVoltage,
-        percent: batteryPercent,
-        timestamp: now,
-      },
-    };
-
-    return sensors;
-  }, []);
-
-  // Serial log functions
-  const clearSerialLog = useCallback(() => {
-    // This would need to be added to robotClient
-    // For now, we can't clear it from here
+    return robotClient.getSensors();
   }, []);
 
   return {
     // State
     state,
     connection: state.connection,
-    isReady: state.connection === "ready",
-    isStreaming: state.bridgeStatus?.streaming ?? false,
+    isReady: state.connection === "connected",
+    isStreaming,
     
     // Connection
     connect,
@@ -266,11 +225,7 @@ export function useRobot(options: UseRobotOptions = {}): UseRobotReturn {
     // Data
     getDiagnostics,
     getSensors,
-    
-    // Serial
-    clearSerialLog,
   };
 }
 
 export default useRobot;
-

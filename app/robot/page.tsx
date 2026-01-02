@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * Robot Diagnostics Page
+ * Robot Diagnostics Page - WiFi Version
  * 
  * Comprehensive robot control and monitoring center.
  * Features: Connection status, motion control, motor gauges,
- * sensor display, serial console, and streaming controls.
+ * sensor display, and streaming controls.
+ * 
+ * Communication is via HTTP to ESP32, which forwards to UNO via Serial2.
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -13,12 +15,13 @@ import Link from "next/link";
 import { useRobot } from "@/hooks/useRobot";
 import {
   MotionControl,
-  SerialConsole,
   SensorDisplay,
   ConnectionStatus,
   MotorGauges,
+  RobotCameraPanel,
+  ServoControl,
 } from "@/components/robot";
-import type { RobotHealthResponse, RobotSensors } from "@/lib/robot/types";
+import type { RobotSensors, RobotStatusResponse } from "@/lib/robot/types";
 
 export default function RobotPage() {
   const {
@@ -31,13 +34,14 @@ export default function RobotPage() {
     checkHealth,
     stop,
     move,
+    setServo,
     startStreaming,
     stopStreaming,
     getDiagnostics,
     getSensors,
   } = useRobot({ autoConnect: true, diagnosticsPollingMs: 2000 });
 
-  const [health, setHealth] = useState<RobotHealthResponse | null>(null);
+  const [status, setStatus] = useState<RobotStatusResponse | null>(null);
   const [sensors, setSensors] = useState<RobotSensors>({
     ultrasonic: null,
     lineSensor: null,
@@ -51,48 +55,47 @@ export default function RobotPage() {
     turnRate: 80,
   });
 
-  // Fetch health on mount and periodically
+  // Fetch status on mount and periodically
   useEffect(() => {
-    const fetchHealth = async () => {
-      const h = await checkHealth();
-      setHealth(h);
+    const fetchStatus = async () => {
+      const s = await checkHealth();
+      if (s) {
+        setStatus(s);
+      }
     };
 
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 5000);
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
   }, [checkHealth]);
 
-  // Handle reconnect
-  const handleReconnect = useCallback(() => {
-    disconnect();
-    setTimeout(() => connect(), 500);
-  }, [connect, disconnect]);
+  // Handle refresh
+  const handleRefresh = useCallback(async () => {
+    const s = await checkHealth();
+    if (s) {
+      setStatus(s);
+    }
+  }, [checkHealth]);
 
   // Handle motion control
   const handleMove = useCallback(async (v: number, w: number) => {
-    if (isStreaming) {
-      // Update streaming setpoint - no need to call any function, 
-      // we just emit new values to the streaming system
-      // For now, we'll use direct motor control
-    }
     await move(v, w);
-  }, [isStreaming, move]);
+  }, [move]);
 
   const handleStop = useCallback(async () => {
     if (isStreaming) {
-      await stopStreaming(true);
+      stopStreaming(true);
     } else {
       await stop();
     }
   }, [isStreaming, stop, stopStreaming]);
 
   // Handle streaming toggle
-  const handleStreamingToggle = useCallback(async () => {
+  const handleStreamingToggle = useCallback(() => {
     if (isStreaming) {
-      await stopStreaming(true);
+      stopStreaming(true);
     } else {
-      await startStreaming(
+      startStreaming(
         streamSettings.velocity,
         streamSettings.turnRate,
         {
@@ -140,6 +143,7 @@ export default function RobotPage() {
             <h1 className="text-xl font-semibold tracking-wide">
               <span className="text-accent-cyan">ZIP</span> Robot Diagnostics
             </h1>
+            <span className="text-xs text-text-muted bg-panel-surface-2 px-2 py-1 rounded">WiFi Mode</span>
           </div>
 
           {/* Emergency Stop Button */}
@@ -155,13 +159,16 @@ export default function RobotPage() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto p-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Connection & Motion */}
+          {/* Left Column - Camera, Connection & Motion */}
           <div className="space-y-6">
+            {/* Camera Stream */}
+            <RobotCameraPanel disabled={false} />
+
             {/* Connection Status */}
             <ConnectionStatus
               connection={connection}
-              health={health}
-              onReconnect={handleReconnect}
+              status={status}
+              onRefresh={handleRefresh}
             />
 
             {/* Motion Control */}
@@ -182,6 +189,13 @@ export default function RobotPage() {
                 isStreaming={isStreaming}
               />
             </div>
+
+            {/* Servo Control */}
+            <ServoControl
+              onSetAngle={setServo}
+              disabled={!isReady}
+              initialAngle={90}
+            />
 
             {/* Streaming Controls */}
             <div className="bg-panel-surface border border-border rounded-lg p-4 space-y-4">
@@ -276,52 +290,44 @@ export default function RobotPage() {
           </div>
         </div>
 
-        {/* Serial Console - Full Width */}
-        <div className="mt-6">
-          <SerialConsole
-            logs={state.serialLog}
-            maxHeight={250}
-          />
-        </div>
-
         {/* Statistics Footer */}
-        {health && (
+        {status && (
           <div className="mt-6 bg-panel-surface border border-border rounded-lg p-4">
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-center">
               <div>
                 <div className="text-text-muted text-xs uppercase tracking-wide">RX Bytes</div>
                 <div className="text-online-green font-mono text-lg">
-                  {health.rxBytes.toLocaleString()}
+                  {status.rxBytes.toLocaleString()}
                 </div>
               </div>
               <div>
                 <div className="text-text-muted text-xs uppercase tracking-wide">TX Bytes</div>
                 <div className="text-accent-cyan font-mono text-lg">
-                  {health.txBytes.toLocaleString()}
+                  {status.txBytes.toLocaleString()}
                 </div>
               </div>
               <div>
-                <div className="text-text-muted text-xs uppercase tracking-wide">Pending</div>
+                <div className="text-text-muted text-xs uppercase tracking-wide">Commands</div>
                 <div className="text-text-primary font-mono text-lg">
-                  {health.pendingQueueDepth}
+                  {status.commands}
                 </div>
               </div>
               <div>
-                <div className="text-text-muted text-xs uppercase tracking-wide">Resets</div>
-                <div className={`font-mono text-lg ${health.resetsSeen > 0 ? "text-yellow-500" : "text-text-primary"}`}>
-                  {health.resetsSeen}
+                <div className="text-text-muted text-xs uppercase tracking-wide">Errors</div>
+                <div className={`font-mono text-lg ${status.errors > 0 ? "text-yellow-500" : "text-text-primary"}`}>
+                  {status.errors}
                 </div>
               </div>
               <div>
-                <div className="text-text-muted text-xs uppercase tracking-wide">Stream Rate</div>
-                <div className={`font-mono text-lg ${health.streaming ? "text-accent-cyan" : "text-text-muted"}`}>
-                  {health.streaming ? `${state.bridgeStatus?.streamRateHz ?? 0}Hz` : "Off"}
+                <div className="text-text-muted text-xs uppercase tracking-wide">Uptime</div>
+                <div className="text-text-primary font-mono text-lg">
+                  {Math.floor(status.uptime / 1000)}s
                 </div>
               </div>
               <div>
                 <div className="text-text-muted text-xs uppercase tracking-wide">Status</div>
-                <div className={`font-mono text-lg ${health.ready ? "text-online-green" : "text-yellow-500"}`}>
-                  {health.ready ? "Ready" : "Handshaking"}
+                <div className={`font-mono text-lg ${status.connected ? "text-online-green" : "text-yellow-500"}`}>
+                  {status.connected ? "Connected" : "No Response"}
                 </div>
               </div>
             </div>
@@ -331,4 +337,3 @@ export default function RobotPage() {
     </div>
   );
 }
-

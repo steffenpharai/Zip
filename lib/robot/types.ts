@@ -1,8 +1,9 @@
 /**
- * Robot Bridge TypeScript Types
+ * Robot TypeScript Types
  * 
- * Type definitions for communication with the ZIP Robot Bridge
- * WebSocket server at ws://localhost:8765/robot
+ * Type definitions for communication with the ZIP Robot via WiFi.
+ * All communication goes through HTTP to the ESP32, which forwards
+ * commands to the Arduino UNO via Serial2.
  */
 
 // ============================================================================
@@ -40,115 +41,32 @@ export const ROBOT_COMMANDS = {
 export type RobotCommandNumber = typeof ROBOT_COMMANDS[keyof typeof ROBOT_COMMANDS];
 
 // ============================================================================
-// WebSocket Message Types (Client -> Bridge)
+// HTTP Response Types (ESP32 API)
 // ============================================================================
 
 /**
- * Send a firmware command and wait for response
+ * Response from POST /api/robot/command
  */
-export interface RobotCommandMessage {
-  type: "robot.command";
-  id: string;
-  payload: FirmwareCommand;
-  expectReply?: boolean;
-  timeoutMs?: number;
-}
-
-/**
- * Start setpoint streaming
- */
-export interface StreamStartMessage {
-  type: "robot.stream.start";
-  id: string;
-  rateHz?: number;  // 1-20, default 10
-  ttlMs?: number;   // 100-500, default 200
-  v: number;        // Forward velocity (-255 to 255)
-  w: number;        // Turn rate (-255 to 255)
-}
-
-/**
- * Update setpoint during streaming
- */
-export interface StreamUpdateMessage {
-  type: "robot.stream.update";
-  id: string;
-  v: number;
-  w: number;
-  ttlMs?: number;
-}
-
-/**
- * Stop streaming
- */
-export interface StreamStopMessage {
-  type: "robot.stream.stop";
-  id: string;
-  hardStop?: boolean;  // Send N=201 stop command
-}
-
-export type RobotClientMessage =
-  | RobotCommandMessage
-  | StreamStartMessage
-  | StreamUpdateMessage
-  | StreamStopMessage;
-
-// ============================================================================
-// WebSocket Message Types (Bridge -> Client)
-// ============================================================================
-
-/**
- * Response to a command
- */
-export interface RobotReplyMessage {
-  type: "robot.reply";
-  id: string;
+export interface RobotCommandResponse {
   ok: boolean;
-  replyKind: "token" | "diagnostics" | "none";
-  token: string | null;
-  diagnostics: string[] | null;
-  timingMs: number;
+  token?: string;
+  diagnostics?: string[];
   error?: string;
+  timingMs: number;
 }
 
 /**
- * Raw serial line received (for debugging)
+ * Response from GET /api/robot/status
  */
-export interface RobotSerialRxMessage {
-  type: "robot.serial.rx";
-  line: string;
-  ts: number;
-}
-
-/**
- * Bridge status snapshot
- */
-export interface RobotStatusMessage {
-  type: "robot.status";
-  ready: boolean;
-  port: string | null;
-  baud: number;
-  streaming: boolean;
-  streamRateHz: number;
+export interface RobotStatusResponse {
+  connected: boolean;
   rxBytes: number;
   txBytes: number;
-  pending: number;
-  lastReadyMsAgo: number | null;
+  commands: number;
+  errors: number;
+  uptime: number;
+  lastResponseMs: number;
 }
-
-/**
- * Bridge error
- */
-export interface RobotErrorMessage {
-  type: "robot.error";
-  code: string;
-  message: string;
-}
-
-export type RobotBridgeMessage =
-  | RobotReplyMessage
-  | RobotSerialRxMessage
-  | RobotStatusMessage
-  | RobotErrorMessage;
 
 // ============================================================================
 // Parsed Diagnostic State
@@ -230,27 +148,22 @@ export interface RobotSensors {
 // Connection State
 // ============================================================================
 
+/**
+ * Simplified connection state for HTTP-based communication
+ */
 export type RobotConnectionState =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "handshaking"
-  | "ready"
-  | "error";
+  | "disconnected"  // Not connected to ESP32 WiFi
+  | "connected"     // Connected to ESP32 WiFi, robot responding
+  | "error";        // Connection error
 
 /**
  * Complete robot state for UI consumption
  */
 export interface RobotState {
   connection: RobotConnectionState;
-  bridgeStatus: RobotStatusMessage | null;
+  esp32Status: RobotStatusResponse | null;
   diagnostics: RobotDiagnostics | null;
   sensors: RobotSensors;
-  serialLog: Array<{
-    direction: "rx" | "tx";
-    line: string;
-    ts: number;
-  }>;
   lastError: string | null;
   lastUpdated: number;
 }
@@ -260,24 +173,84 @@ export interface RobotState {
  */
 export const INITIAL_ROBOT_STATE: RobotState = {
   connection: "disconnected",
-  bridgeStatus: null,
+  esp32Status: null,
   diagnostics: null,
   sensors: {
     ultrasonic: null,
     lineSensor: null,
     battery: null,
   },
-  serialLog: [],
   lastError: null,
   lastUpdated: 0,
 };
 
 // ============================================================================
-// Health Check Response
+// Configuration
 // ============================================================================
 
 /**
- * Response from GET /health on port 8766
+ * WiFi Robot Configuration
+ */
+export interface RobotConfig {
+  /** ESP32 base URL (default: http://192.168.4.1) */
+  esp32BaseUrl: string;
+  /** Request timeout in ms */
+  commandTimeoutMs: number;
+  /** Status polling interval in ms */
+  statusPollingMs: number;
+  /** Diagnostics polling interval in ms */
+  diagnosticsPollingMs: number;
+  /** Streaming rate for motion commands */
+  defaultStreamRateHz: number;
+  /** TTL for motion commands */
+  defaultStreamTtlMs: number;
+}
+
+export const DEFAULT_ROBOT_CONFIG: RobotConfig = {
+  esp32BaseUrl: process.env.NEXT_PUBLIC_ESP32_URL || "http://192.168.4.1",
+  commandTimeoutMs: 2000,
+  statusPollingMs: 5000,
+  diagnosticsPollingMs: 2000,
+  defaultStreamRateHz: 10,
+  defaultStreamTtlMs: 200,
+};
+
+// ============================================================================
+// Legacy Types (for backward compatibility during migration)
+// ============================================================================
+
+/**
+ * @deprecated Use RobotStatusResponse instead
+ */
+export interface RobotStatusMessage {
+  type: "robot.status";
+  ready: boolean;
+  port: string | null;
+  baud: number;
+  streaming: boolean;
+  streamRateHz: number;
+  rxBytes: number;
+  txBytes: number;
+  pending: number;
+  lastReadyMsAgo: number | null;
+}
+
+/**
+ * @deprecated Use RobotCommandResponse instead
+ */
+export interface RobotReplyMessage {
+  type: "robot.reply";
+  id: string;
+  ok: boolean;
+  replyKind: "token" | "diagnostics" | "none";
+  token: string | null;
+  diagnostics: string[] | null;
+  timingMs: number;
+  error?: string;
+}
+
+/**
+ * @deprecated No longer used with HTTP-based communication
  */
 export interface RobotHealthResponse {
   status: "ok" | "error";
@@ -296,28 +269,3 @@ export interface RobotHealthResponse {
   uptime: number;
   timestamp: number;
 }
-
-// ============================================================================
-// Configuration
-// ============================================================================
-
-export interface RobotConfig {
-  bridgeWsUrl: string;      // Default: ws://localhost:8765/robot
-  bridgeHttpUrl: string;    // Default: http://localhost:8766
-  reconnectIntervalMs: number;
-  maxReconnectAttempts: number;
-  commandTimeoutMs: number;
-  defaultStreamRateHz: number;
-  defaultStreamTtlMs: number;
-}
-
-export const DEFAULT_ROBOT_CONFIG: RobotConfig = {
-  bridgeWsUrl: process.env.ROBOT_BRIDGE_WS_URL || "ws://localhost:8765/robot",
-  bridgeHttpUrl: process.env.ROBOT_BRIDGE_HTTP_URL || "http://localhost:8766",
-  reconnectIntervalMs: 2000,
-  maxReconnectAttempts: 10,
-  commandTimeoutMs: 1000, // Increased from 250ms for reliability
-  defaultStreamRateHz: 10,
-  defaultStreamTtlMs: 200,
-};
-
