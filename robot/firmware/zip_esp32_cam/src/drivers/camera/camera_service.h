@@ -120,21 +120,5 @@ bool camera_set_quality(int quality);
  */
 sensor_t* camera_get_sensor();
 
-/**
- * Stop the camera (deinit) to free resources during WiFi initialization.
- * Camera config is stored internally for later re-initialization.
- * 
- * @return true if camera was stopped successfully, false otherwise
- */
-bool camera_stop();
-
-/**
- * Resume the camera (reinit) after WiFi initialization completes.
- * Uses stored camera config from previous initialization.
- * 
- * @return true if camera was resumed successfully, false otherwise
- */
-bool camera_resume();
-
 #endif // CAMERA_SERVICE_H
 

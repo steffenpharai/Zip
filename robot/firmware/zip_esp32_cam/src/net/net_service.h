@@ -127,11 +127,5 @@ NetStats net_get_stats();
  */
 const char* net_last_error();
 
-/**
- * Mark that camera was stopped before WiFi init (for resume tracking).
- * Call this after stopping the camera in setup() if you stop it there.
- */
-void net_mark_camera_stopped();
-
 #endif // NET_SERVICE_H
 

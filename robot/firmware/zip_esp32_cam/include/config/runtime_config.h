@@ -15,7 +15,7 @@
 // Camera Configuration
 // ============================================================================
 
-// External clock frequency for OV2640
+// External clock frequency for OV3660
 // 20 MHz is stable; some boards support up to 24 MHz
 #ifndef CONFIG_XCLK_HZ
 #define CONFIG_XCLK_HZ              20000000    // 20 MHz
@@ -91,9 +91,11 @@
 #define CONFIG_WIFI_CHANNEL         9
 #endif
 
-// WiFi TX power
+// WiFi TX power (in 0.25dBm units, e.g., 40 = 10dBm)
+// Reduced to 10dBm to prevent power supply brownout during WiFi init
+// ESP-IDF uses 0.25dBm units, not Arduino WiFi enum
 #ifndef CONFIG_WIFI_TX_POWER
-#define CONFIG_WIFI_TX_POWER        WIFI_POWER_19_5dBm
+#define CONFIG_WIFI_TX_POWER        40  // 10dBm in 0.25dBm units (reduced from 78/19.5dBm)
 #endif
 
 // SSID prefix (MAC address is appended)
@@ -138,10 +140,10 @@
 // Watchdog Configuration
 // ============================================================================
 
-// Watchdog timeout during initialization (longer for camera + WiFi init)
-// WiFi.mode() and WiFi.softAP() can take 2-5 seconds, so we need longer timeout
+// Watchdog timeout during initialization
+// Set to 5 seconds for camera loop to ensure robot resets if frame capture stalls
 #ifndef CONFIG_WDT_INIT_TIMEOUT_S
-#define CONFIG_WDT_INIT_TIMEOUT_S   60  // Increased from 30 to 60 seconds
+#define CONFIG_WDT_INIT_TIMEOUT_S   5   // 5 seconds (reduced from 30s for camera safety)
 #endif
 
 // Watchdog timeout during runtime

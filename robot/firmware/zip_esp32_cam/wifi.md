@@ -511,7 +511,7 @@ loop() (runs on core 0)
 
 **Last Updated**: 2025-01-XX
 
-**Current State**: ✅ **RESOLVED** - Multi-layered solution implemented with camera stop/resume, watchdog management, and IDLE task yielding
+**Current State**: ✅ **RESOLVED** - Migrated to ESP-IDF native WiFi API, eliminating Arduino WiFi library incompatibility
 
 ### Solution 14: Stop Camera Before WiFi Initialization
 
@@ -801,9 +801,28 @@ rst:0x8 (TG1WDT_SYS_RST),boot:0x2b (SPI_FAST_FLASH_BOOT)
 - **2025-01-03**: Further investigation revealed camera stop itself causes buffer overflow during deinit - removed camera stop
 - **2025-01-03**: Reset still occurs even with camera COMPLETELY DISABLED - not a camera issue
 - **2025-01-03**: Reset occurs during WiFi.mode(WIFI_AP) even when task is kept registered and watchdog is fed
-- **2025-01-03**: Root cause identified as likely Interrupt Watchdog Timer (IWDT), not Task Watchdog - WiFi.mode() blocks ISRs ❌ **UNRESOLVED**
+- **2025-01-03**: Root cause identified as likely Interrupt Watchdog Timer (IWDT), not Task Watchdog - WiFi.mode() blocks ISRs
+- **2025-01-XX**: Migrated to ESP-IDF native WiFi API - Complete rewrite of WiFi service using `esp_wifi_*` functions
+- **2025-01-XX**: Fixed event handler registration - Proper event loop initialization and registration timing
+- **2025-01-XX**: WiFi initialization now works reliably - No watchdog resets, stable AP operation ✅ **RESOLVED**
 
-## Latest Investigation (2025-01-03): Fundamental WiFi Initialization Issue
+## Resolution (2025-01-XX): ESP-IDF Native WiFi API Migration
+
+### Final Solution
+
+After extensive investigation, the root cause was identified as a fundamental incompatibility between the Arduino WiFi library and ESP32-S3, likely due to Interrupt Watchdog Timer (IWDT) issues. The solution was to completely migrate to ESP-IDF native WiFi API.
+
+**Key Changes**:
+1. Replaced Arduino WiFi library with ESP-IDF `esp_wifi_*` functions
+2. Proper event loop initialization before WiFi init
+3. Correct initialization sequence: netif → event loop → WiFi init → mode set → event handler registration → WiFi start
+4. Fixed event handler registration timing (after WiFi mode is set)
+
+**Result**: WiFi now initializes reliably without watchdog resets, and users can successfully connect to the AP.
+
+---
+
+## Previous Investigation (2025-01-03): Fundamental WiFi Initialization Issue
 
 ### Critical Discovery
 
@@ -869,38 +888,46 @@ rst:0x8 (TG1WDT_SYS_RST)
 | 16 | IDLE task yielding (vTaskDelay) | ❌ FAILED | Still resets |
 | 17 | Disable camera entirely | ❌ FAILED | Still resets - not a camera issue |
 | 18 | Feed watchdog (not delete) before WiFi | ❌ FAILED | Still resets - likely IWDT not TWDT |
-| 19 | All of above combined | ❌ FAILED | Reset persists regardless of configuration |
+| 19 | Migrate to ESP-IDF native WiFi API | ✅ **SUCCESS** | Complete rewrite using `esp_wifi_*` functions - WiFi now works reliably |
 
-### Current Status: UNRESOLVED
+### Solution 19: Migrate to ESP-IDF Native WiFi API ✅ **RESOLVED**
 
-**Conclusion**: The Arduino-ESP32 `WiFi.mode(WIFI_AP)` call on ESP32-S3 has a **fundamental incompatibility** that triggers watchdog resets regardless of:
-- Camera state (enabled/disabled)
-- Watchdog timeout settings
-- Task registration state
-- IDLE task yielding
-- Settling delays
+**Status**: ✅ **IMPLEMENTED AND WORKING**
 
-**Likely root cause**: Interrupt Watchdog Timer (IWDT) triggered by excessive ISR latency during WiFi radio initialization.
+**Root Cause Identified**: The Arduino-ESP32 `WiFi.mode(WIFI_AP)` library has a fundamental incompatibility with ESP32-S3 that triggers watchdog resets, likely due to Interrupt Watchdog Timer (IWDT) being triggered by excessive ISR latency during WiFi radio initialization.
 
-### Recommended Solutions
+**Solution**: Complete migration from Arduino WiFi library to ESP-IDF native WiFi API.
 
-1. **Use ESP32-S3 as UART bridge only** (no WiFi, no camera)
-   - Simple serial passthrough between Arduino UNO and USB
-   - Eliminates WiFi initialization entirely
+**Implementation**:
+- Replaced all Arduino WiFi calls (`WiFi.mode()`, `WiFi.softAP()`, etc.) with ESP-IDF functions
+- Used `esp_wifi_init()`, `esp_wifi_set_mode()`, `esp_wifi_start()`, `esp_wifi_set_config()`
+- Implemented proper event loop initialization (`esp_event_loop_create_default()`)
+- Fixed event handler registration timing (register after WiFi mode is set)
+- Proper initialization sequence: `esp_netif_init()` → `esp_event_loop_create_default()` → `esp_wifi_init()` → `esp_wifi_set_mode()` → `esp_event_handler_instance_register()` → `esp_wifi_start()`
 
-2. **Use ESP-IDF native WiFi API** (bypass Arduino WiFi library)
-   - Lower-level control over WiFi initialization
-   - May have better interrupt/watchdog handling
-   - Requires significant refactoring
+**Key Files Modified**:
+- `src/net/net_service.cpp` - Complete rewrite using ESP-IDF WiFi API
+- `src/net/net_service.h` - Updated interface for ESP-IDF functions
 
-3. **Use separate ESP32 module for WiFi** (not ESP32-S3)
-   - ESP32-WROOM or ESP32-C3 may have better Arduino WiFi compatibility
-   - ESP32-S3 focus on camera, separate module for WiFi
+**Result**: ✅ **SUCCESS**
+- WiFi AP initializes successfully without watchdog resets
+- Event handlers register correctly
+- WiFi events are received and logged properly
+- Stable connection with no resets
+- System boots reliably every time
 
-4. **Accept WiFi limitation** and use alternative connectivity
-   - USB serial communication only
-   - External WiFi adapter
-   - Different hardware platform
+**Observed Behavior** (Current Implementation):
+- ✅ WiFi AP starts successfully: `[NET] WiFi AP started (took 34 ms)`
+- ✅ Event handler registers: `[NET] WiFi event handler registered successfully`
+- ✅ WiFi events received: `[NET] WiFi AP started event received`
+- ✅ AP IP assigned: `[NET] AP IP: 192.168.4.1`
+- ✅ Web servers start: `[WEB] HTTP servers ready`
+- ✅ No watchdog resets
+- ✅ Stable operation confirmed by user connection
+
+### Current Status: ✅ **RESOLVED**
+
+**Conclusion**: The issue was resolved by migrating from Arduino WiFi library to ESP-IDF native WiFi API. The ESP-IDF API provides better control over initialization sequence, proper event loop handling, and avoids the interrupt watchdog issues present in the Arduino library.
 
 ### Technical Notes
 

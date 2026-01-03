@@ -2,10 +2,10 @@
  * Board Configuration - ESP32S3-Camera-v1.0 (ELEGOO Smart Robot Car V4.0)
  * 
  * Single source of truth for all pin assignments and board capabilities.
- * This header defines the correct ESP32-S3 GPIO mappings for the OV2640 camera
+ * This header defines the correct ESP32-S3 GPIO mappings for the OV3660 camera
  * and UART bridge to the robot shield.
  * 
- * Hardware: ESP32-S3-WROOM-1 + OV2640 camera module
+ * Hardware: ESP32-S3-WROOM-1 + OV3660 camera module
  * Shield: ELEGOO SmartRobot-Shield (TB6612)
  */
 
@@ -21,29 +21,31 @@
 #define BOARD_NAME                  "ESP32S3-Camera-v1.0"
 #define BOARD_VENDOR                "ELEGOO"
 #define BOARD_MCU                   "ESP32-S3-WROOM-1"
-#define BOARD_CAMERA_SENSOR         "OV2640"
+#define BOARD_CAMERA_SENSOR         "OV3660"
 
 // ============================================================================
 // Camera Pin Definitions (ESP32-S3 Valid GPIOs)
 // ============================================================================
-// These pins are the correct ESP32-S3 mapping for the ELEGOO camera module.
+// These pins are the correct ESP32-S3 mapping for the ELEGOO OV3660 camera module.
 // Unlike ESP32-WROVER, ESP32-S3 does not have GPIO 34, 35, 36, 39.
+// 
+// NOTE: GPIO 45 (XCLK) is a strapping pin - requires 100ms delay before camera init.
 
 #define CAM_PWDN_GPIO               (-1)    // Power down not connected
 #define CAM_RESET_GPIO              (-1)    // Reset not connected
-#define CAM_XCLK_GPIO               15      // External clock
-#define CAM_SIOD_GPIO               4       // I2C SDA (SCCB data)
-#define CAM_SIOC_GPIO               5       // I2C SCL (SCCB clock)
+#define CAM_XCLK_GPIO               45      // External clock (strapping pin - must delay before init)
+#define CAM_SIOD_GPIO               1       // I2C SDA (SCCB data) - was GPIO 4
+#define CAM_SIOC_GPIO               2       // I2C SCL (SCCB clock) - was GPIO 5
 
 // Parallel data pins (D0-D7 mapped to Y2-Y9)
-#define CAM_Y2_GPIO                 11      // D0
-#define CAM_Y3_GPIO                 9       // D1
-#define CAM_Y4_GPIO                 8       // D2
-#define CAM_Y5_GPIO                 10      // D3
-#define CAM_Y6_GPIO                 12      // D4
-#define CAM_Y7_GPIO                 18      // D5
-#define CAM_Y8_GPIO                 17      // D6
-#define CAM_Y9_GPIO                 16      // D7
+#define CAM_Y2_GPIO                 47      // D0 (shared with Flash LED)
+#define CAM_Y3_GPIO                 18      // D1 - was GPIO 9
+#define CAM_Y4_GPIO                 17      // D2 - was GPIO 8
+#define CAM_Y5_GPIO                 16      // D3 - was GPIO 10
+#define CAM_Y6_GPIO                 15      // D4 - was GPIO 12
+#define CAM_Y7_GPIO                 14      // D5 - was GPIO 18
+#define CAM_Y8_GPIO                 48      // D6 - was GPIO 17 (resolves PCLK conflict)
+#define CAM_Y9_GPIO                 12      // D7 - was GPIO 16
 
 // Sync signals
 #define CAM_VSYNC_GPIO              6       // Vertical sync
@@ -51,38 +53,37 @@
 #define CAM_PCLK_GPIO               13      // Pixel clock
 
 // ============================================================================
-// UART Pin Definitions (Final Datasheet-Aligned Configuration)
+// UART Pin Definitions (OV3660 Configuration)
 // ============================================================================
-// Final recommendation based on ESP32-S3 datasheet and hardware constraints:
-//   RX = GPIO33  (safe input, not used by camera, IMU, motors, or boot)
-//   TX = GPIO1   (safe output, WROVER-compatible, not used by camera)
+// UART pins updated for OV3660 camera module:
+//   RX = GPIO44  (hardware UART0, safe input)
+//   TX = GPIO43  (hardware UART0, safe output)
 //
-// These pins are the ONLY viable UART pair when camera is enabled:
-//   - GPIO4 is off-limits (camera SIOD/I2C conflict)
-//   - GPIO0 is off-limits (boot strapping pin)
-//   - GPIO33 is safe and available for RX
-//   - GPIO1 is safe and available for TX
+// Previous pins (GPIO33/GPIO1) are now used by camera:
+//   - GPIO1 is now camera SIOD (I2C SDA) - must not be used for UART
+//   - GPIO33 is available but GPIO44/43 are preferred for hardware UART0
 //
 // The shield P8 header labels "0(RX)" and "1(TX)" refer to Arduino D0/D1,
-// NOT ESP32 GPIO numbers. The physical routing maps to GPIO1/GPIO33.
+// NOT ESP32 GPIO numbers. The physical routing maps to GPIO43/GPIO44.
 
-#define UART_RX_GPIO                33      // Safe input (datasheet-aligned)
-#define UART_TX_GPIO                1       // Safe output (WROVER-compatible)
+#define UART_RX_GPIO                44      // Hardware UART0 RX
+#define UART_TX_GPIO                43      // Hardware UART0 TX
 
 // ============================================================================
 // LED Pin Definition
 // ============================================================================
-// Status LED moved from GPIO13 to GPIO14 to avoid conflict with CAM_PCLK_GPIO.
-// GPIO13 is used by camera PCLK signal.
+// Status LED moved to GPIO3 for OV3660 configuration.
+// GPIO14 is now used by camera D5 data pin.
 
-#define LED_STATUS_GPIO             14      // Safe GPIO for status LED
+#define LED_STATUS_GPIO             3       // Status LED (was GPIO 14)
 
 // ============================================================================
 // Optional Camera LED / Flash LED
 // ============================================================================
 // Define if the board has a camera flash LED. Set to -1 if not present.
+// For OV3660, flash LED shares GPIO 47 with camera D0 data pin.
 #ifdef BOARD_HAS_CAMERA_LED
-#define CAM_LED_GPIO                48      // Adjust based on actual board
+#define CAM_LED_GPIO                47      // Flash LED (shared with D0)
 #else
 #define CAM_LED_GPIO                (-1)    // Not present
 #endif
@@ -152,7 +153,7 @@ struct BoardConfig {
 // during initialization based on actual hardware detection.
 
 #define BOARD_DEFAULT_UART_BAUD     115200
-#define BOARD_DEFAULT_XCLK_HZ       20000000    // 20 MHz (stable for OV2640)
+#define BOARD_DEFAULT_XCLK_HZ       20000000    // 20 MHz (stable for OV3660, can test 24 MHz)
 #define BOARD_DEFAULT_PSRAM_BYTES   8388608     // 8 MB (typical for S3)
 #define BOARD_DEFAULT_FLASH_BYTES   8388608     // 8 MB (typical for S3)
 

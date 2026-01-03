@@ -3,17 +3,21 @@
  * 
  * WiFi Access Point with ELEGOO MAC-based SSID.
  * Non-blocking initialization with status tracking.
+ * Uses ESP-IDF native WiFi API for better watchdog compatibility.
  */
 
 #include "net_service.h"
 #include <Arduino.h>
-#include <WiFi.h>
+#include "esp_wifi.h"
+#include "esp_netif.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_task_wdt.h"
 #include "config/build_config.h"
 #include "config/runtime_config.h"
-#include "drivers/camera/camera_service.h"
 
 // ============================================================================
 // WiFi Initialization State Machine
@@ -42,8 +46,195 @@ static unsigned long s_stable_wait_start = 0;
 static int s_stable_wait_count = 0;
 static const char* s_error_message = "Not initialized";
 static const unsigned long BOOT_WIFI_TIMEOUT_MS = 20000;  // 20 second software timeout for boot
-static const unsigned long WIFI_SETTLE_DELAY_MS = 2000;  // 2 second settling delay before WiFi init
-static bool s_camera_was_running = false;  // Track if camera was running before WiFi init
+static esp_netif_t* s_ap_netif = NULL;
+static bool s_wifi_initialized = false;
+static bool s_ap_started = false;
+static int8_t s_tx_power_dbm = 19;  // Default TX power in dBm
+static TaskHandle_t s_wifi_init_task_handle = NULL;
+
+// Forward declaration
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,
+                               int32_t event_id, void* event_data);
+
+// ============================================================================
+// WiFi Initialization Task (NOT registered with watchdog)
+// ============================================================================
+static void wifi_init_task(void* parameter) {
+    // This task is NOT registered with watchdog to avoid resets during blocking calls
+    // However, IWDT (Interrupt Watchdog Timer) still monitors interrupt latency
+    // Add yields between blocking calls to allow interrupts to be serviced
+    LOG_I("NET", "WiFi init task started");
+    
+    // CRITICAL: Set TX power to LOW (10dBm) BEFORE WiFi init to reduce current spike
+    // This prevents USB power brownout that triggers watchdog resets
+    // Must be called before esp_wifi_init() to take effect
+    LOG_I("NET", "Setting low TX power (10dBm) to prevent power brownout...");
+    // Note: esp_wifi_set_max_tx_power() requires WiFi to be initialized first,
+    // so we'll set it after esp_wifi_init() but before esp_wifi_start()
+    
+    // Yield to allow other tasks and interrupts to run
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // Initialize network interface
+    LOG_I("NET", "Calling esp_netif_init()...");
+    esp_netif_init();
+    
+    // Yield after netif init to allow interrupts
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // CRITICAL: Create default event loop before registering event handlers
+    // esp_netif_init() may create it, but we need to ensure it exists
+    LOG_I("NET", "Creating default event loop...");
+    esp_err_t event_loop_ret = esp_event_loop_create_default();
+    if (event_loop_ret != ESP_OK && event_loop_ret != ESP_ERR_INVALID_STATE) {
+        // ESP_ERR_INVALID_STATE means it already exists, which is fine
+        LOG_W("NET", "Event loop creation returned: %s (may already exist)", esp_err_to_name(event_loop_ret));
+    } else if (event_loop_ret == ESP_OK) {
+        LOG_I("NET", "Default event loop created");
+    } else {
+        LOG_I("NET", "Default event loop already exists");
+    }
+    
+    // Yield after event loop creation
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    LOG_I("NET", "Creating default WiFi AP netif...");
+    s_ap_netif = esp_netif_create_default_wifi_ap();
+    if (!s_ap_netif) {
+        LOG_E("NET", "Failed to create AP network interface");
+        s_init_state = WiFiInitState::ERROR;
+        s_status = NetStatus::ERROR;
+        s_error_message = "Failed to create AP netif";
+        s_wifi_init_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    // Yield after netif creation
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // CRITICAL: Add longer delay before WiFi init to allow power supply to stabilize
+    // esp_wifi_init() triggers radio calibration requiring ~500mA current burst
+    // USB power needs time to recover and stabilize before this high-current operation
+    LOG_I("NET", "Waiting 500ms for power supply stabilization before WiFi init...");
+    vTaskDelay(pdMS_TO_TICKS(500));  // 500ms delay to stabilize power supply
+    
+    // Initialize WiFi with default config
+    // Note: esp_wifi_init() triggers radio calibration which requires ~500mA current burst
+    // The reduced TX power (set later) helps, but the init itself still draws high current
+    LOG_I("NET", "Calling esp_wifi_init() (this may cause power brownout on USB)...");
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    
+    // Reduce WiFi init power consumption by limiting features
+    // This may help reduce current spike during initialization
+    cfg.static_rx_buf_num = 5;  // Reduce from default (10) to lower memory/power
+    cfg.dynamic_rx_buf_num = 5;  // Reduce from default (32) to lower memory/power
+    cfg.static_tx_buf_num = 2;   // Reduce from default (0, uses dynamic) to lower power
+    cfg.dynamic_tx_buf_num = 5;  // Reduce from default (32) to lower power
+    
+    esp_err_t ret = esp_wifi_init(&cfg);
+    if (ret != ESP_OK) {
+        LOG_E("NET", "esp_wifi_init() failed: %s", esp_err_to_name(ret));
+        s_init_state = WiFiInitState::ERROR;
+        s_status = NetStatus::ERROR;
+        s_error_message = "WiFi init failed";
+        s_wifi_init_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    // Yield after WiFi init
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // CRITICAL: Set low TX power BEFORE setting mode to reduce current spike
+    // This prevents USB power brownout during radio calibration
+    // Must be called after esp_wifi_init() but before esp_wifi_set_mode()
+    LOG_I("NET", "Setting low TX power (10dBm) to prevent power brownout...");
+    ret = esp_wifi_set_max_tx_power(CONFIG_WIFI_TX_POWER);  // 40 = 10dBm
+    if (ret != ESP_OK) {
+        LOG_W("NET", "Failed to set TX power: %s (continuing anyway)", esp_err_to_name(ret));
+    } else {
+        LOG_I("NET", "TX power set to 10dBm (reduced from 19.5dBm)");
+    }
+    s_tx_power_dbm = CONFIG_WIFI_TX_POWER / 4;  // Cache for status reporting
+    
+    // Yield after setting TX power
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // Set WiFi mode to AP BEFORE registering event handler
+    // This ensures WiFi is in the correct state for event registration
+    LOG_I("NET", "Setting WiFi mode to AP...");
+    ret = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (ret != ESP_OK) {
+        LOG_E("NET", "esp_wifi_set_mode() failed: %s", esp_err_to_name(ret));
+        s_init_state = WiFiInitState::ERROR;
+        s_status = NetStatus::ERROR;
+        s_error_message = "Failed to set WiFi mode";
+        s_wifi_init_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    // Yield after setting mode to allow state to settle
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // Register event handler AFTER WiFi mode is set
+    // This ensures WiFi is in a valid state for event registration
+    LOG_I("NET", "Registering WiFi event handler...");
+    esp_event_handler_instance_t instance_any_id;
+    ret = esp_event_handler_instance_register(WIFI_EVENT,
+                                              ESP_EVENT_ANY_ID,
+                                              &wifi_event_handler,
+                                              NULL,
+                                              &instance_any_id);
+    if (ret != ESP_OK) {
+        LOG_W("NET", "Failed to register WiFi event handler: %s", esp_err_to_name(ret));
+        // Non-critical - WiFi will still work, just won't receive events
+    } else {
+        LOG_I("NET", "WiFi event handler registered successfully");
+    }
+    
+    // Yield after event handler registration
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    s_wifi_initialized = true;
+    LOG_I("NET", "WiFi initialized and mode set to AP");
+    
+    // Task completes - handle will be cleared
+    s_wifi_init_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+// ============================================================================
+// WiFi Event Handler
+// ============================================================================
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,
+                               int32_t event_id, void* event_data) {
+    if (event_base == WIFI_EVENT) {
+        switch (event_id) {
+            case WIFI_EVENT_AP_START:
+                s_ap_started = true;
+                LOG_I("NET", "WiFi AP started event received");
+                break;
+            case WIFI_EVENT_AP_STOP:
+                s_ap_started = false;
+                LOG_I("NET", "WiFi AP stopped event received");
+                break;
+            case WIFI_EVENT_AP_STACONNECTED: {
+                wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+                LOG_I("NET", "Station connected: MAC=" MACSTR, MAC2STR(event->mac));
+                break;
+            }
+            case WIFI_EVENT_AP_STADISCONNECTED: {
+                wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+                LOG_I("NET", "Station disconnected: MAC=" MACSTR, MAC2STR(event->mac));
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}
 
 // ============================================================================
 // SSID Generation (ELEGOO Convention)
@@ -71,12 +262,8 @@ bool net_init_sync() {
     generate_ssid();
     LOG_I("NET", "SSID: %s", s_ssid.c_str());
     
-    // DON'T call WiFi.setTxPower() here - it must be called AFTER WiFi.softAP()
-    // Calling it before WiFi is initialized causes warnings and instability
-    
-    // DON'T call WiFi.mode(WIFI_AP) here - it's blocking and causes TG1WDT starvation
-    // Instead, start the async state machine which will handle it in net_tick()
-    // Camera will be stopped right before WiFi.mode() in the state machine
+    // ESP-IDF WiFi initialization happens in net_tick() state machine
+    // This prevents blocking calls during setup() and allows proper watchdog handling
     LOG_I("NET", "Starting WiFi initialization (will complete in loop)...");
     s_status = NetStatus::INITIALIZING;
     s_init_state = WiFiInitState::SET_MODE;  // Skip GENERATE_SSID since we already did it
@@ -107,13 +294,6 @@ bool net_start() {
 }
 
 bool net_tick() {
-    // #region agent log - Hypothesis A: net_tick() is being called (throttled to avoid log flood)
-    static unsigned long last_net_tick_log = 0;
-    if (millis() - last_net_tick_log > 500) {  // Log every 500ms to avoid spam
-        Serial.printf("[DBG-NET-TICK] net_tick() called at %lu ms, state=%d\n", millis(), (int)s_init_state);
-        last_net_tick_log = millis();
-    }
-    // #endregion
     
     // Check for software timeout (robust boot timeout)
     if (s_init_state != WiFiInitState::IDLE && 
@@ -147,15 +327,7 @@ bool net_tick() {
         }
         
         case WiFiInitState::SET_MODE: {
-            // #region agent log - Hypothesis B: SET_MODE state is reached (log only once)
-            static bool set_mode_logged = false;
-            if (!set_mode_logged) {
-                Serial.printf("[DBG-NET-TICK] SET_MODE state entered at %lu ms\n", millis());
-                set_mode_logged = true;
-            }
-            // #endregion
-            
-            // Check software timeout before blocking call
+            // Check software timeout before initialization
             unsigned long elapsed = millis() - s_init_start_time;
             if (elapsed > BOOT_WIFI_TIMEOUT_MS) {
                 s_init_state = WiFiInitState::ERROR;
@@ -166,166 +338,43 @@ bool net_tick() {
                 return false;
             }
             
-            // CRITICAL: Stop camera FIRST, before settle delay
-            // Camera HAL generates VSYNC/EOF interrupts that compete with WiFi during init
-            // This prevents EV-VSYNC-OVF and EV-EOF-OVF errors that trigger TG1WDT
-            // We stop it immediately when entering this state, not after settle delay
-            static bool camera_stopped_flag = false;
-#if ENABLE_CAMERA
-            if (!camera_stopped_flag && camera_is_ok()) {
-                // #region agent log - Hypothesis C: Camera stop is executing
-                Serial.printf("[DBG-NET-TICK] About to stop camera at %lu ms\n", millis());
-                // #endregion
-                
-                LOG_I("NET", "Stopping camera hardware (deinit) to prevent resource conflict");
-                Serial.printf("[NET] Stopping camera hardware (deinit) for WiFi init...\n");
-                s_camera_was_running = true;  // Remember that camera was running
-                
-                // #region agent log - Hypothesis D: Camera stop call timing
-                unsigned long camera_stop_start = millis();
-                // #endregion
-                
-                bool camera_stopped = camera_stop();  // Calls esp_camera_deinit() - stops all interrupts
-                
-                // #region agent log - Hypothesis D: Camera stop result
-                unsigned long camera_stop_end = millis();
-                Serial.printf("[DBG-NET-TICK] camera_stop() returned %d at %lu ms (duration=%lu ms)\n", 
-                              camera_stopped, camera_stop_end, camera_stop_end - camera_stop_start);
-                // #endregion
-                
-                if (!camera_stopped) {
-                    LOG_W("NET", "Failed to stop camera, continuing with WiFi init");
-                    s_camera_was_running = false;  // Reset flag if stop failed
-                } else {
-                    Serial.printf("[NET] Camera hardware stopped successfully (interrupts disabled)\n");
+            // Start WiFi initialization task if not already started
+            // This task is NOT registered with watchdog to avoid resets during blocking calls
+            if (!s_wifi_initialized && s_wifi_init_task_handle == NULL) {
+                LOG_I("NET", "Starting ESP-IDF WiFi initialization task...");
+                xTaskCreatePinnedToCore(
+                    wifi_init_task,
+                    "wifi_init",
+                    4096,
+                    NULL,
+                    1,
+                    &s_wifi_init_task_handle,
+                    0  // Core 0
+                );
+                if (s_wifi_init_task_handle == NULL) {
+                    s_init_state = WiFiInitState::ERROR;
+                    s_status = NetStatus::ERROR;
+                    s_error_message = "Failed to create WiFi init task";
+                    LOG_E("NET", "Failed to create WiFi initialization task");
+                    return false;
                 }
-                camera_stopped_flag = true;  // Only stop once
-            }
-#endif
-            
-            // CRITICAL: Wait for system to settle before hitting WiFi radio
-            // TG1WDT (Timer Group 1 Watchdog) is very sensitive to power spikes
-            // during WiFi initialization. A 2-second delay allows FreeRTOS tasks
-            // to stabilize and prevents the hardware watchdog from triggering.
-            // Camera is already stopped, so no interrupts during this period
-            // #region agent log - Hypothesis E: Settle delay check (throttled to avoid log flood)
-            static unsigned long s_boot_time_ms = 0;
-            static unsigned long last_settle_log = 0;
-            if (s_boot_time_ms == 0) {
-                s_boot_time_ms = millis();
-                Serial.printf("[DBG-NET-TICK] Boot time recorded: %lu ms, waiting %lu ms for settle delay\n", 
-                              s_boot_time_ms, WIFI_SETTLE_DELAY_MS);
-            }
-            unsigned long current_time = millis();
-            unsigned long time_since_boot = current_time - s_boot_time_ms;
-            
-            // Log settle delay progress only every 500ms to avoid flooding
-            if (millis() - last_settle_log > 500) {
-                unsigned long remaining = WIFI_SETTLE_DELAY_MS - time_since_boot;
-                if (remaining > 0) {
-                    Serial.printf("[DBG-NET-TICK] Waiting for settle delay: %lu ms remaining\n", remaining);
-                }
-                last_settle_log = millis();
-            }
-            // #endregion
-            
-            if (time_since_boot < WIFI_SETTLE_DELAY_MS) {
-                // Still waiting for settle delay - return and try again next tick
-                // Camera is already stopped, so no resource conflict during wait
+                // Wait for initialization to complete (check on next tick)
                 return true;
             }
             
-            // System has settled and camera is stopped - proceed with WiFi initialization
-            unsigned long current_time_final = millis();
-            Serial.printf("[NET] System settled at %lu ms. Initializing WiFi...\n", current_time_final);
-            LOG_I("NET", "System settled, starting WiFi mode transition");
-            
-            // FINAL VERIFICATION: Ensure camera is stopped before blocking WiFi call
-            // This is a safety check - camera should already be stopped in setup() or above
-#if ENABLE_CAMERA
-            if (camera_is_ok()) {
-                // #region agent log - Hypothesis G: Camera still running before WiFi.mode()
-                Serial.printf("[DBG-NET-TICK] WARNING: Camera still running before WiFi.mode()! Stopping now...\n");
-                // #endregion
-                LOG_W("NET", "Camera still running before WiFi.mode() - stopping now");
-                camera_stop();
-                s_camera_was_running = true;
+            // Check if initialization is complete
+            if (s_wifi_initialized) {
+                // WiFi is initialized, continue to next state
+                s_init_state = WiFiInitState::START_AP;
+                return true;  // Continue to next state
             } else {
-                // #region agent log - Hypothesis G: Camera confirmed stopped before WiFi.mode()
-                Serial.printf("[DBG-NET-TICK] Camera confirmed stopped before WiFi.mode() at %lu ms\n", millis());
-                // #endregion
+                // Still initializing, wait
+                return true;
             }
-#endif
-            
-            // CRITICAL: Feed watchdog BEFORE blocking WiFi call
-            // DO NOT delete task from watchdog - this causes TG1WDT reset when IDLE task can't run
-            // The 60-second watchdog timeout (set at boot) is sufficient for WiFi.mode() (~2-5s)
-            // #region agent log - Feed watchdog before WiFi.mode()
-            Serial.printf("[DBG-NET-TICK] Feeding watchdog before WiFi.mode() at %lu ms\n", millis());
-            Serial.flush();  // Ensure message is printed before blocking call
-            // #endregion
-            esp_task_wdt_reset();  // Feed watchdog (60s timeout >> 2-5s WiFi.mode call)
-            Serial.printf("[DBG-NET-TICK] Watchdog fed at %lu ms\n", millis());
-            Serial.flush();
-            
-            // Set WiFi mode to AP with diagnostic logging
-            unsigned long before_mode = millis();
-            size_t heap_before = ESP.getFreeHeap();
-            size_t psram_before = ESP.getFreePsram();
-            
-            LOG_I("NET", "Setting WiFi mode to AP (this may take a few seconds)...");
-            Serial.printf("[DBG-WIFI] Starting WiFi.mode(WIFI_AP) at %lu ms\n", before_mode);
-            Serial.printf("[NET-DIAG] Before WiFi.mode(): heap=%lu, psram=%lu, time=%lu ms\n",
-                          heap_before, psram_before, before_mode);
-            
-            // #region agent log - Hypothesis G: About to call WiFi.mode() with camera stopped
-            Serial.printf("[DBG-NET-TICK] About to call WiFi.mode(WIFI_AP) - camera_is_ok()=%d\n", camera_is_ok());
-            Serial.printf("[DBG-NET-TICK] Watchdog deleted, about to enter blocking WiFi.mode() call\n");
-            // #endregion
-            
-            // CRITICAL: Yield to IDLE task before blocking call to prevent TG1WDT starvation
-            // The TG1WDT monitors the IDLE task - if it can't run, the watchdog triggers
-            // Yielding here ensures the IDLE task has a chance to run and feed the watchdog
-            // #region agent log - Hypothesis I: Yield to IDLE task before blocking call
-            Serial.printf("[DBG-NET-TICK] Yielding to IDLE task before WiFi.mode() at %lu ms\n", millis());
-            // #endregion
-            vTaskDelay(pdMS_TO_TICKS(10));  // Yield 10ms to allow IDLE task to run
-            Serial.printf("[DBG-NET-TICK] Yield complete, about to call WiFi.mode() at %lu ms\n", millis());
-            
-            // #region agent log - Hypothesis H: Entering blocking WiFi.mode() call
-            unsigned long wifi_mode_start = millis();
-            Serial.printf("[DBG-WIFI] Entering WiFi.mode(WIFI_AP) blocking call at %lu ms\n", wifi_mode_start);
-            // #endregion
-            
-            WiFi.mode(WIFI_AP);  // Blocking call (2-5 seconds typical)
-            
-            // #region agent log - Hypothesis H: WiFi.mode() call completed
-            unsigned long wifi_mode_end = millis();
-            Serial.printf("[DBG-WIFI] WiFi.mode(WIFI_AP) call completed at %lu ms (duration=%lu ms)\n", 
-                          wifi_mode_end, wifi_mode_end - wifi_mode_start);
-            // #endregion
-            
-            // Re-register with Task Watchdog after blocking call completes
-            esp_task_wdt_add(NULL);
-            esp_task_wdt_reset();
-            
-            unsigned long after_mode = millis();
-            size_t heap_after = ESP.getFreeHeap();
-            size_t psram_after = ESP.getFreePsram();
-            unsigned long mode_duration = after_mode - before_mode;
-            
-            Serial.printf("[DBG-WIFI] WiFi.mode(WIFI_AP) returned at %lu ms (duration=%lu ms)\n", 
-                          after_mode, mode_duration);
-            Serial.printf("[NET-DIAG] After WiFi.mode(): heap=%lu, psram=%lu, duration=%lu ms\n",
-                          heap_after, psram_after, mode_duration);
-            LOG_I("NET", "WiFi mode set to AP (took %lu ms)", mode_duration);
-            
-            s_init_state = WiFiInitState::START_AP;  // Skip SET_TX_POWER - do it after softAP
-            return true;  // Continue to next state
         }
         
         case WiFiInitState::START_AP: {
-            // Check software timeout before blocking call
+            // Check software timeout before starting AP
             unsigned long elapsed = millis() - s_init_start_time;
             if (elapsed > BOOT_WIFI_TIMEOUT_MS) {
                 s_init_state = WiFiInitState::ERROR;
@@ -336,62 +385,44 @@ bool net_tick() {
                 return false;
             }
             
-            // Feed watchdog BEFORE blocking WiFi.softAP() call
-            // DO NOT delete task from watchdog - keep it registered
-            esp_task_wdt_reset();
-            Serial.flush();  // Ensure logs are printed before blocking call
-
-            // Start Access Point with diagnostic logging
-            unsigned long before_softap = millis();
-            size_t heap_before = ESP.getFreeHeap();
-            size_t psram_before = ESP.getFreePsram();
-
-            LOG_I("NET", "Starting softAP '%s' on channel %d (this may take a few seconds)...",
-                  s_ssid.c_str(), CONFIG_WIFI_CHANNEL);
-            Serial.printf("[DBG-WIFI] Starting WiFi.softAP() at %lu ms\n", before_softap);
-            Serial.printf("[NET-DIAG] Before WiFi.softAP(): heap=%lu, psram=%lu, time=%lu ms\n",
-                          heap_before, psram_before, before_softap);
-
-            // CRITICAL: Yield to IDLE task before blocking call to prevent TG1WDT starvation
-            // The TG1WDT monitors the IDLE task - if it can't run, the watchdog triggers
-            // Yielding here ensures the IDLE task has a chance to run and feed the watchdog
-            Serial.printf("[DBG-NET-TICK] Yielding to IDLE task before WiFi.softAP() at %lu ms\n", millis());
-            vTaskDelay(pdMS_TO_TICKS(10));  // Yield 10ms to allow IDLE task to run
-            Serial.printf("[DBG-NET-TICK] Yield complete, about to call WiFi.softAP() at %lu ms\n", millis());
-
-            bool result = WiFi.softAP(s_ssid.c_str(), "", CONFIG_WIFI_CHANNEL);  // Blocking call (2-5s typical)
-
-            // Feed watchdog after blocking call completes
-            esp_task_wdt_reset();
-            esp_task_wdt_reset();
+            // Configure and start Access Point (non-blocking)
+            LOG_I("NET", "Configuring AP '%s' on channel %d...", s_ssid.c_str(), CONFIG_WIFI_CHANNEL);
             
-            unsigned long after_softap = millis();
-            size_t heap_after = ESP.getFreeHeap();
-            size_t psram_after = ESP.getFreePsram();
-            unsigned long softap_duration = after_softap - before_softap;
+            wifi_config_t wifi_config = {};
+            strncpy((char*)wifi_config.ap.ssid, s_ssid.c_str(), sizeof(wifi_config.ap.ssid) - 1);
+            wifi_config.ap.ssid_len = strlen(s_ssid.c_str());
+            wifi_config.ap.password[0] = '\0';  // Open network (no password)
+            wifi_config.ap.channel = CONFIG_WIFI_CHANNEL;
+            wifi_config.ap.max_connection = 4;
+            wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+            wifi_config.ap.ssid_hidden = 0;
             
-            Serial.printf("[DBG-WIFI] WiFi.softAP() returned at %lu ms\n", after_softap);
-            
-            Serial.printf("[NET-DIAG] After WiFi.softAP(): heap=%lu, psram=%lu, duration=%lu ms, result=%s\n",
-                          heap_after, psram_after, softap_duration, result ? "OK" : "FAILED");
-            
-            if (!result) {
+            esp_err_t ret = esp_wifi_set_config(WIFI_IF_AP, &wifi_config);
+            if (ret != ESP_OK) {
                 s_init_state = WiFiInitState::ERROR;
                 s_status = NetStatus::ERROR;
-                s_error_message = "softAP failed";
-                LOG_E("NET", "Failed to start Access Point");
-                LOG_W("NET", "Continuing boot WITHOUT WiFi (safe mode)");
-                Serial.println("[BOOT] WiFi softAP FAILED - continuing without WiFi");
+                s_error_message = "Failed to set WiFi config";
+                LOG_E("NET", "esp_wifi_set_config() failed: %s", esp_err_to_name(ret));
                 return false;
             }
             
-            LOG_I("NET", "softAP started successfully (took %lu ms)", softap_duration);
+            // TX power already set in WiFi init task (before esp_wifi_start())
+            // Just cache the value for status reporting
+            s_tx_power_dbm = CONFIG_WIFI_TX_POWER / 4;  // Convert 0.25dBm units to dBm
             
-            // NOW set TX power - must be called AFTER WiFi.softAP() is initialized
-            // Calling it before causes "Neither AP or STA has been started" warning
-            // and can contribute to instability during radio power-on phase
-            LOG_V("NET", "Setting TX power (enum: 0x%x)", (int)CONFIG_WIFI_TX_POWER);
-            WiFi.setTxPower((wifi_power_t)CONFIG_WIFI_TX_POWER);
+            // Start WiFi (non-blocking)
+            unsigned long before_start = millis();
+            ret = esp_wifi_start();
+            if (ret != ESP_OK) {
+                s_init_state = WiFiInitState::ERROR;
+                s_status = NetStatus::ERROR;
+                s_error_message = "Failed to start WiFi";
+                LOG_E("NET", "esp_wifi_start() failed: %s", esp_err_to_name(ret));
+                return false;
+            }
+            
+            unsigned long after_start = millis();
+            LOG_I("NET", "WiFi AP started (took %lu ms)", after_start - before_start);
             
             s_init_state = WiFiInitState::WAIT_STABLE;
             s_stable_wait_start = millis();
@@ -400,48 +431,50 @@ bool net_tick() {
         }
         
         case WiFiInitState::WAIT_STABLE: {
-            // Wait for AP to stabilize (non-blocking, check every tick)
+            // Wait for AP to start and stabilize
+            // Check if AP started event was received or wait for IP assignment
             unsigned long wait_elapsed = millis() - s_stable_wait_start;
             
-            if (wait_elapsed >= 1000) {  // Wait 1 second total
-                s_init_state = WiFiInitState::DONE;
-                s_status = NetStatus::AP_ACTIVE;
-                s_start_time = millis();
-                s_error_message = "OK";
+            // Wait for AP to be ready (check event flag or wait 1 second)
+            if (s_ap_started || wait_elapsed >= 1000) {
+                // Get IP address
+                esp_netif_ip_info_t ip_info;
+                esp_err_t ret = esp_netif_get_ip_info(s_ap_netif, &ip_info);
                 
-                LOG_I("NET", "AP IP: %s", WiFi.softAPIP().toString().c_str());
-                LOG_I("NET", "WiFi Access Point ready");
-                
-                // Resume camera after WiFi init completes successfully
-                // Use s_camera_was_running flag since camera_is_ok() will be false after stop
-#if ENABLE_CAMERA
-                if (s_camera_was_running) {
-                    LOG_I("NET", "Resuming camera hardware (reinit) after WiFi init");
-                    Serial.printf("[NET] Resuming camera hardware (reinit) after WiFi init\n");
-                    bool resume_result = camera_resume();  // Calls esp_camera_init() with stored config
-                    if (resume_result) {
-                        LOG_I("NET", "Camera resumed successfully");
-                        Serial.printf("[NET] Camera hardware resumed successfully\n");
-                    } else {
-                        LOG_W("NET", "Camera resume failed, continuing without camera");
-                        Serial.printf("[NET] Camera resume failed, continuing without camera\n");
+                if (ret == ESP_OK) {
+                    s_init_state = WiFiInitState::DONE;
+                    s_status = NetStatus::AP_ACTIVE;
+                    s_start_time = millis();
+                    s_error_message = "OK";
+                    
+                    char ip_str[16];
+                    snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
+                    LOG_I("NET", "AP IP: %s", ip_str);
+                    LOG_I("NET", "WiFi Access Point ready");
+                    
+                    // Print connection instructions
+                    Serial.println(":----------------------------:");
+                    Serial.printf("wifi_name:%s\n", s_ssid.c_str());
+                    Serial.println(":----------------------------:");
+                    Serial.printf("WiFi Ready! Use 'http://%s' to connect\n", ip_str);
+                    
+                    // Send READY marker to bridge (signals WiFi is ready and ESP32 can handle commands)
+                    Serial.println("READY");
+                    Serial.flush();
+                    
+                    return false;  // Done
+                } else {
+                    // IP not ready yet, continue waiting
+                    if (wait_elapsed >= 2000) {  // 2 second timeout for IP assignment
+                        LOG_W("NET", "AP started but IP not assigned after 2 seconds");
+                        // Continue anyway - IP might be assigned later
+                        s_init_state = WiFiInitState::DONE;
+                        s_status = NetStatus::AP_ACTIVE;
+                        s_start_time = millis();
+                        s_error_message = "OK (IP pending)";
+                        return false;
                     }
-                    s_camera_was_running = false;  // Reset flag
                 }
-#endif
-                
-                // Print connection instructions
-                Serial.println(":----------------------------:");
-                Serial.printf("wifi_name:%s\n", s_ssid.c_str());
-                Serial.println(":----------------------------:");
-                Serial.printf("Camera Ready! Use 'http://%s' to connect\n", 
-                              WiFi.softAPIP().toString().c_str());
-                
-                // Send READY marker to bridge (signals WiFi is ready and ESP32 can handle commands)
-                Serial.println("READY");
-                Serial.flush();
-                
-                return false;  // Done
             }
             
             return true;  // Still waiting
@@ -467,10 +500,17 @@ bool net_is_ok() {
 }
 
 IPAddress net_get_ip() {
-    if (s_status != NetStatus::AP_ACTIVE) {
+    if (s_status != NetStatus::AP_ACTIVE || !s_ap_netif) {
         return IPAddress(0, 0, 0, 0);
     }
-    return WiFi.softAPIP();
+    
+    esp_netif_ip_info_t ip_info;
+    esp_err_t ret = esp_netif_get_ip_info(s_ap_netif, &ip_info);
+    if (ret != ESP_OK) {
+        return IPAddress(0, 0, 0, 0);
+    }
+    
+    return IPAddress(ip_info.ip.addr);
 }
 
 String net_get_ssid() {
@@ -483,14 +523,33 @@ String net_get_mac_suffix() {
 
 int8_t net_get_rssi() {
     // In AP mode, we don't have RSSI, return TX power instead
-    return (int8_t)WiFi.getTxPower();
+    if (s_status != NetStatus::AP_ACTIVE) {
+        return 0;
+    }
+    
+    int8_t power = 0;
+    esp_err_t ret = esp_wifi_get_max_tx_power(&power);
+    if (ret == ESP_OK) {
+        // Convert from 0.25dBm units to dBm
+        return power / 4;
+    }
+    
+    // Return cached value if API call fails
+    return s_tx_power_dbm;
 }
 
 uint8_t net_get_station_count() {
     if (s_status != NetStatus::AP_ACTIVE) {
         return 0;
     }
-    return WiFi.softAPgetStationNum();
+    
+    wifi_sta_list_t sta_list;
+    esp_err_t ret = esp_wifi_ap_get_sta_list(&sta_list);
+    if (ret != ESP_OK) {
+        return 0;
+    }
+    
+    return sta_list.num;
 }
 
 NetStats net_get_stats() {
@@ -504,9 +563,5 @@ NetStats net_get_stats() {
 
 const char* net_last_error() {
     return s_error_message;
-}
-
-void net_mark_camera_stopped() {
-    s_camera_was_running = true;
 }
 

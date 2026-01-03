@@ -2,15 +2,15 @@
  * UART Bridge Service - Implementation
  * 
  * UART communication bridge to the robot shield (Arduino UNO).
- * Uses GPIO33 (RX) and GPIO1 (TX) as defined in board_esp32s3_elegoo_cam.h.
+ * Uses GPIO44 (RX) and GPIO43 (TX) as defined in board_esp32s3_elegoo_cam.h.
  * 
- * Pin assignments (ESP32-S3-WROOM-1):
- *   - RX: GPIO33 (ELEGOO-specific assignment for bridge to Arduino UNO)
- *   - TX: GPIO1 (Standard TX pin for serial communication)
+ * Pin assignments (ESP32-S3-WROOM-1 with OV3660):
+ *   - RX: GPIO44 (Hardware UART0 RX for bridge to Arduino UNO)
+ *   - TX: GPIO43 (Hardware UART0 TX for serial communication)
  * 
- * Note: Previous versions used GPIO0 for RX, but GPIO0 is a boot
- * strapping pin and does not work reliably as UART RX on ESP32-S3.
- * GPIO33 is the correct ELEGOO pinout for the Smart Robot Car shield.
+ * Note: Previous OV2640 configuration used GPIO33/GPIO1, but these are now
+ * used by the OV3660 camera (GPIO1 is SIOD/I2C SDA). GPIO43/44 are hardware
+ * UART0 pins and work correctly with the shield slide-switch in "cam" position.
  */
 
 #include "uart_bridge.h"
@@ -93,9 +93,10 @@ bool uart_init() {
     // Small delay for GPIO and Arduino UNO to settle after power-on
     delay(50);
     
-    // Initialize Serial2 with ELEGOO pinout (GPIO33/GPIO1)
-    // Note: Previous versions used GPIO0 for RX which doesn't work on ESP32-S3
-    // because GPIO0 is a boot strapping pin. GPIO33 is the correct ELEGOO pinout.
+    // Initialize Serial2 with OV3660 pinout (GPIO44/GPIO43)
+    // Note: Previous OV2640 configuration used GPIO33/GPIO1, but GPIO1 is now
+    // used by camera SIOD (I2C SDA). GPIO43/44 are hardware UART0 pins.
+    // Ensure shield slide-switch is in "cam" position to bridge GPIO43/44 to Arduino Uno.
     Serial2.begin(CONFIG_UART_BAUD, SERIAL_8N1, UART_RX_GPIO, UART_TX_GPIO);
     
     s_initialized = true;

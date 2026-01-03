@@ -2,15 +2,16 @@
  * UART Bridge Service - Interface
  * 
  * Provides UART communication with the robot shield (Arduino UNO).
- * Uses WROVER-compatible UART0 pinout for shield compatibility.
+ * Uses hardware UART0 pinout for OV3660 camera configuration.
  * 
  * Hardware: ELEGOO SmartRobot-Shield (designed for ESP32-WROVER)
- *   TX = GPIO1 (ESP32 → Arduino RX)
- *   RX = GPIO3 (Arduino TX → ESP32)
+ *   TX = GPIO43 (ESP32 → Arduino RX)
+ *   RX = GPIO44 (Arduino TX → ESP32)
  * 
  * Note: The shield P8 header labels "0(RX)" and "1(TX)" refer to
- * Arduino D0/D1, not ESP32 GPIO numbers. The physical routing
- * matches ESP32-WROVER UART0: GPIO1 (TX) and GPIO3 (RX).
+ * Arduino D0/D1, not ESP32 GPIO numbers. For OV3660 configuration,
+ * the physical routing uses GPIO43 (TX) and GPIO44 (RX) via hardware UART0.
+ * Ensure shield slide-switch is in "cam" position.
  */
 
 #ifndef UART_BRIDGE_H
@@ -40,7 +41,7 @@ struct UartStats {
 
 /**
  * Initialize the UART bridge.
- * Configures Serial2 with WROVER-compatible pins (GPIO1/GPIO3).
+ * Configures Serial2 with OV3660-compatible pins (GPIO43/GPIO44).
  * 
  * @return true if initialization succeeded
  */
@@ -55,10 +56,10 @@ bool uart_is_ok();
 
 /**
  * Check if boot guard window has expired.
- * Legacy function - always returns true with GPIO3 (non-strapping pin).
+ * Legacy function - always returns true with GPIO44 (non-strapping pin).
  * Retained for API compatibility.
  * 
- * @return true (always, since GPIO3 doesn't need boot protection)
+ * @return true (always, since GPIO44 doesn't need boot protection)
  */
 bool uart_boot_guard_expired();
 

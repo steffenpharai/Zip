@@ -25,12 +25,6 @@ static esp_err_t s_last_error = ESP_OK;
 static const char* s_error_message = "Not initialized";
 static CameraStats s_stats = {0, 0, 0, 0, 0};
 
-// Stored camera configuration for resume after stop
-static camera_config_t s_stored_config;
-static bool s_config_stored = false;
-static framesize_t s_stored_framesize = FRAMESIZE_VGA;
-static int s_stored_vflip = 0;
-static int s_stored_hmirror = 0;
 
 // ============================================================================
 // Error Code to String Mapping
@@ -140,6 +134,13 @@ bool camera_init() {
     Serial.printf("[DBG-CAM] PSRAM before init: %lu bytes free\n", psram_before);
     // #endregion
     
+    // CRITICAL: Add 100ms delay before esp_camera_init() for GPIO 45 strapping pin safety
+    // GPIO 45 (XCLK) is a strapping pin that controls internal voltage for SPI flash (VDD_SPI)
+    // during boot. If XCLK toggles during boot, it can cause "MD5 Mismatch" or boot loop.
+    // This delay allows strapping pins to latch their initial values and boot process to complete.
+    LOG_I("CAM", "Waiting 100ms for GPIO 45 strapping pin to settle...");
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
     // No watchdog manipulation - let system defaults handle it
     // Attempt initialization with timeout guard
     LOG_I("CAM", "Calling esp_camera_init()...");
@@ -201,20 +202,19 @@ bool camera_init() {
         sensor->set_framesize(sensor, FRAMESIZE_VGA);
         sensor->set_vflip(sensor, 0);
         sensor->set_hmirror(sensor, 0);
-        LOG_I("CAM", "Sensor configured: %s (VGA 640x480)", 
-              sensor->id.PID == OV2640_PID ? "OV2640" : "Unknown");
         
-        // Store sensor settings for resume
-        s_stored_framesize = FRAMESIZE_VGA;
-        s_stored_vflip = 0;
-        s_stored_hmirror = 0;
+        // Detect sensor type (OV3660 or OV2640)
+        const char* sensor_name = "Unknown";
+        if (sensor->id.PID == OV3660_PID) {
+            sensor_name = "OV3660";
+        } else if (sensor->id.PID == OV2640_PID) {
+            sensor_name = "OV2640";
+        }
+        LOG_I("CAM", "Sensor configured: %s (VGA 640x480)", sensor_name);
+        
     } else {
         LOG_W("CAM", "Could not get sensor handle");
     }
-    
-    // Store camera config for later resume
-    memcpy(&s_stored_config, &config, sizeof(camera_config_t));
-    s_config_stored = true;
     
     s_status = CameraStatus::OK;
     s_error_message = "OK";
@@ -313,134 +313,4 @@ sensor_t* camera_get_sensor() {
     return esp_camera_sensor_get();
 }
 
-// ============================================================================
-// Camera Stop/Resume Functions
-// ============================================================================
-bool camera_stop() {
-#if !ENABLE_CAMERA
-    return false;
-#else
-    if (s_status != CameraStatus::OK) {
-        LOG_W("CAM", "Camera not initialized, cannot stop");
-        return false;
-    }
-    
-    unsigned long stop_start = millis();
-    LOG_I("CAM", "Stopping camera (deinit) before WiFi init...");
-    Serial.printf("[CAM] Camera stop started at %lu ms\n", stop_start);
-    
-    // Sensor settings are already stored in s_stored_framesize, s_stored_vflip, s_stored_hmirror
-    // from camera_init(), so we don't need to read them back here
-    
-    // CRITICAL: Delete task from watchdog before blocking esp_camera_deinit() call
-    // esp_camera_deinit() is blocking and can take time, during which camera interrupts
-    // may still fire. This prevents TG1WDT from triggering during deinit.
-    // #region agent log - Hypothesis J: Watchdog management during camera_stop()
-    Serial.printf("[DBG-CAM] Deleting task from watchdog before esp_camera_deinit() at %lu ms\n", millis());
-    // #endregion
-    esp_task_wdt_delete(NULL);
-    
-    // Yield to IDLE task before blocking deinit to prevent TG1WDT starvation
-    // #region agent log - Hypothesis J: Yield before camera deinit
-    Serial.printf("[DBG-CAM] Yielding to IDLE task before esp_camera_deinit() at %lu ms\n", millis());
-    // #endregion
-    vTaskDelay(pdMS_TO_TICKS(10));  // Yield 10ms to allow IDLE task to run
-    
-    // Deinitialize camera - stops HAL, disables interrupts, frees buffers
-    // This is a blocking call that can take time
-    // #region agent log - Hypothesis J: Entering blocking esp_camera_deinit()
-    Serial.printf("[DBG-CAM] Entering esp_camera_deinit() blocking call at %lu ms\n", millis());
-    // #endregion
-    esp_err_t deinit_result = esp_camera_deinit();
-    
-    // #region agent log - Hypothesis J: esp_camera_deinit() completed
-    unsigned long deinit_end = millis();
-    Serial.printf("[DBG-CAM] esp_camera_deinit() completed at %lu ms (result=0x%x)\n", deinit_end, deinit_result);
-    // #endregion
-    
-    // Re-add task to watchdog after deinit completes
-    // #region agent log - Hypothesis J: Re-adding task to watchdog after camera deinit
-    Serial.printf("[DBG-CAM] Re-adding task to watchdog after esp_camera_deinit() at %lu ms\n", millis());
-    // #endregion
-    esp_task_wdt_add(NULL);
-    esp_task_wdt_reset();
-    
-    unsigned long stop_duration = millis() - stop_start;
-    
-    if (deinit_result != ESP_OK) {
-        LOG_E("CAM", "Camera deinit failed: 0x%x", deinit_result);
-        s_error_message = "Deinit failed";
-        return false;
-    }
-    
-    // Update status
-    s_status = CameraStatus::NOT_INITIALIZED;
-    s_error_message = "Stopped";
-    
-    LOG_I("CAM", "Camera stopped (deinit) successfully (took %lu ms)", stop_duration);
-    Serial.printf("[CAM] Camera stopped at %lu ms (duration=%lu ms)\n", 
-                  millis(), stop_duration);
-    
-    return true;
-#endif
-}
-
-bool camera_resume() {
-#if !ENABLE_CAMERA
-    return false;
-#else
-    if (!s_config_stored) {
-        LOG_E("CAM", "No stored camera config, cannot resume");
-        s_error_message = "No stored config";
-        return false;
-    }
-    
-    if (s_status == CameraStatus::OK) {
-        LOG_W("CAM", "Camera already initialized, no need to resume");
-        return true;
-    }
-    
-    unsigned long resume_start = millis();
-    LOG_I("CAM", "Resuming camera (reinit) after WiFi init...");
-    Serial.printf("[CAM] Camera resume started at %lu ms\n", resume_start);
-    
-    // Re-initialize camera with stored config
-    unsigned long init_start = millis();
-    s_last_error = esp_camera_init(&s_stored_config);
-    unsigned long init_duration = millis() - init_start;
-    
-    if (s_last_error != ESP_OK) {
-        s_status = CameraStatus::INIT_FAILED;
-        s_error_message = esp_err_to_name_safe(s_last_error);
-        LOG_E("CAM", "Camera resume (reinit) failed: 0x%x (%s) after %lu ms", 
-              s_last_error, s_error_message, init_duration);
-        Serial.printf("[CAM] Camera resume failed: 0x%x (took %lu ms)\n", 
-                      s_last_error, init_duration);
-        return false;
-    }
-    
-    // Restore sensor settings
-    sensor_t* sensor = esp_camera_sensor_get();
-    if (sensor) {
-        sensor->set_framesize(sensor, s_stored_framesize);
-        sensor->set_vflip(sensor, s_stored_vflip);
-        sensor->set_hmirror(sensor, s_stored_hmirror);
-        LOG_I("CAM", "Sensor settings restored: framesize=%d, vflip=%d, hmirror=%d",
-              s_stored_framesize, s_stored_vflip, s_stored_hmirror);
-    } else {
-        LOG_W("CAM", "Could not get sensor handle after resume");
-    }
-    
-    // Update status
-    s_status = CameraStatus::OK;
-    s_error_message = "OK";
-    
-    unsigned long resume_duration = millis() - resume_start;
-    LOG_I("CAM", "Camera resumed (reinit) successfully (took %lu ms)", resume_duration);
-    Serial.printf("[CAM] Camera resumed at %lu ms (duration=%lu ms, init=%lu ms)\n", 
-                  millis(), resume_duration, init_duration);
-    
-    return true;
-#endif
-}
 
