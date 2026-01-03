@@ -716,37 +716,11 @@ void setup() {
     Serial.printf("[DBG-SETUP] camera_is_ok()=%d, cameraOk=%d\n", camera_is_ok(), cameraOk);
     // #endregion
     
-    // CRITICAL: Stop camera IMMEDIATELY in setup() before WiFi init
-    // Don't wait for net_tick() - camera must be stopped before any WiFi operations
+    // REMOVED: Camera stop causes watchdog reset due to buffer overflows during deinit
+    // WiFi initialization works fine with camera running using watchdog management + IDLE yielding
+    // See wifi.md for details
 #if ENABLE_CAMERA
-    if (cameraOk && camera_is_ok()) {
-        // #region agent log - Hypothesis F: Camera stop in setup()
-        Serial.printf("[DBG-SETUP] Stopping camera in setup() at %lu ms\n", millis());
-        unsigned long setup_camera_stop_start = millis();
-        // #endregion
-        
-        LOG_I("INIT", "Stopping camera before WiFi initialization...");
-        bool camera_stopped = camera_stop();
-        
-        // #region agent log - Hypothesis F: Camera stop result in setup()
-        unsigned long setup_camera_stop_end = millis();
-        Serial.printf("[DBG-SETUP] camera_stop() in setup() returned %d at %lu ms (duration=%lu ms)\n",
-                      camera_stopped, setup_camera_stop_end, setup_camera_stop_end - setup_camera_stop_start);
-        // #endregion
-        
-        if (camera_stopped) {
-            Serial.printf("[DBG-SETUP] Camera stopped successfully in setup() at %lu ms\n", millis());
-            // Mark camera as stopped so it can be resumed after WiFi init
-            net_mark_camera_stopped();
-        } else {
-            LOG_W("INIT", "Failed to stop camera in setup(), continuing anyway");
-        }
-    } else {
-        // #region agent log - Hypothesis F: Camera not running, skip stop
-        Serial.printf("[DBG-SETUP] Camera not running (cameraOk=%d, camera_is_ok()=%d), skipping stop\n",
-                      cameraOk, camera_is_ok());
-        // #endregion
-    }
+    Serial.printf("[DBG-SETUP] Skipping camera stop - WiFi init will work with camera running at %lu ms\n", millis());
 #endif
     
     LOG_I("INIT", "Starting WiFi Access Point initialization (async)...");

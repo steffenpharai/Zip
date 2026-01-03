@@ -257,15 +257,15 @@ bool net_tick() {
             }
 #endif
             
-            // CRITICAL: Temporarily unregister from Task Watchdog BEFORE blocking WiFi call
-            // The WiFi library's internal tasks will handle their own watchdog management
-            // This prevents TG1WDT from triggering during the blocking call
-            // #region agent log - Hypothesis H: Watchdog management before WiFi.mode()
-            Serial.printf("[DBG-NET-TICK] Deleting task from watchdog before WiFi.mode() at %lu ms\n", millis());
+            // CRITICAL: Feed watchdog BEFORE blocking WiFi call
+            // DO NOT delete task from watchdog - this causes TG1WDT reset when IDLE task can't run
+            // The 60-second watchdog timeout (set at boot) is sufficient for WiFi.mode() (~2-5s)
+            // #region agent log - Feed watchdog before WiFi.mode()
+            Serial.printf("[DBG-NET-TICK] Feeding watchdog before WiFi.mode() at %lu ms\n", millis());
             Serial.flush();  // Ensure message is printed before blocking call
             // #endregion
-            esp_err_t wdt_delete_result = esp_task_wdt_delete(NULL);
-            Serial.printf("[DBG-NET-TICK] Watchdog delete result: 0x%x at %lu ms\n", wdt_delete_result, millis());
+            esp_task_wdt_reset();  // Feed watchdog (60s timeout >> 2-5s WiFi.mode call)
+            Serial.printf("[DBG-NET-TICK] Watchdog fed at %lu ms\n", millis());
             Serial.flush();
             
             // Set WiFi mode to AP with diagnostic logging
@@ -336,32 +336,33 @@ bool net_tick() {
                 return false;
             }
             
-            // Temporarily unregister from Task Watchdog for blocking call
-            esp_task_wdt_delete(NULL);
+            // Feed watchdog BEFORE blocking WiFi.softAP() call
+            // DO NOT delete task from watchdog - keep it registered
+            esp_task_wdt_reset();
             Serial.flush();  // Ensure logs are printed before blocking call
-            
+
             // Start Access Point with diagnostic logging
             unsigned long before_softap = millis();
             size_t heap_before = ESP.getFreeHeap();
             size_t psram_before = ESP.getFreePsram();
-            
-            LOG_I("NET", "Starting softAP '%s' on channel %d (this may take a few seconds)...", 
+
+            LOG_I("NET", "Starting softAP '%s' on channel %d (this may take a few seconds)...",
                   s_ssid.c_str(), CONFIG_WIFI_CHANNEL);
             Serial.printf("[DBG-WIFI] Starting WiFi.softAP() at %lu ms\n", before_softap);
             Serial.printf("[NET-DIAG] Before WiFi.softAP(): heap=%lu, psram=%lu, time=%lu ms\n",
                           heap_before, psram_before, before_softap);
-            
+
             // CRITICAL: Yield to IDLE task before blocking call to prevent TG1WDT starvation
             // The TG1WDT monitors the IDLE task - if it can't run, the watchdog triggers
             // Yielding here ensures the IDLE task has a chance to run and feed the watchdog
             Serial.printf("[DBG-NET-TICK] Yielding to IDLE task before WiFi.softAP() at %lu ms\n", millis());
             vTaskDelay(pdMS_TO_TICKS(10));  // Yield 10ms to allow IDLE task to run
             Serial.printf("[DBG-NET-TICK] Yield complete, about to call WiFi.softAP() at %lu ms\n", millis());
-            
+
             bool result = WiFi.softAP(s_ssid.c_str(), "", CONFIG_WIFI_CHANNEL);  // Blocking call (2-5s typical)
-            
-            // Re-register with Task Watchdog after blocking call completes
-            esp_task_wdt_add(NULL);
+
+            // Feed watchdog after blocking call completes
+            esp_task_wdt_reset();
             esp_task_wdt_reset();
             
             unsigned long after_softap = millis();

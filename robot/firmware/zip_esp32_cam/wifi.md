@@ -798,4 +798,116 @@ rst:0x8 (TG1WDT_SYS_RST),boot:0x2b (SPI_FAST_FLASH_BOOT)
 - **2025-01-XX**: Added settling delay - 2-second delay before WiFi init to allow system stabilization
 - **2025-01-XX**: Fixed TX power timing - Set TX power after `WiFi.softAP()` completes (not before)
 - **2025-01-XX**: Multi-layered solution complete - Camera stop + Watchdog management + IDLE yielding + Settling delay ✅ **RESOLVED**
+- **2025-01-03**: Further investigation revealed camera stop itself causes buffer overflow during deinit - removed camera stop
+- **2025-01-03**: Reset still occurs even with camera COMPLETELY DISABLED - not a camera issue
+- **2025-01-03**: Reset occurs during WiFi.mode(WIFI_AP) even when task is kept registered and watchdog is fed
+- **2025-01-03**: Root cause identified as likely Interrupt Watchdog Timer (IWDT), not Task Watchdog - WiFi.mode() blocks ISRs ❌ **UNRESOLVED**
+
+## Latest Investigation (2025-01-03): Fundamental WiFi Initialization Issue
+
+### Critical Discovery
+
+After extensive testing, the watchdog reset during `WiFi.mode(WIFI_AP)` persists **regardless of all attempted mitigations**:
+
+1. ✅ Camera completely disabled (`ENABLE_CAMERA=0`) - **Still resets**
+2. ✅ Task kept registered with watchdog (not deleted) - **Still resets**
+3. ✅ Watchdog fed immediately before WiFi.mode() - **Still resets**
+4. ✅ 60-second watchdog timeout (>> 2-5s WiFi call) - **Still resets**
+5. ✅ IDLE task yielding (vTaskDelay) before call - **Still resets**
+6. ✅ 2-second settling delay before WiFi init - **Still resets**
+
+### Serial Log Evidence
+
+**Consistent pattern across all attempts**:
+```
+[DBG-NET-TICK] Feeding watchdog before WiFi.mode() at 2873 ms
+[DBG-NET-TICK] Watchdog fed at 2878 ms
+[NET] Setting WiFi mode to AP (this may take a few seconds)...
+[DBG-WIFI] Starting WiFi.mode(WIFI_AP) at 2878 ms
+[DBG-NET-TICK] Yielding to IDLE task before WiFi.mode() at 2878 ms
+[DBG-WIFI] Entering WiFi.mode(WIFI_AP) blocking call at 2888 ms
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x8 (TG1WDT_SYS_RST),boot:0x2b (SPI_FAST_FLASH_BOOT)  ← IMMEDIATE RESET
+Saved PC:0x40377b61
+```
+
+### Root Cause Analysis (Final)
+
+The reset is **NOT** caused by the Task Watchdog Timer (TWDT) being starved. Evidence:
+- Watchdog is fed immediately before the call
+- 60-second timeout is far longer than the 2-5 second WiFi.mode() execution time
+- No other tasks are competing for CPU time
+
+**Likely cause**: **Interrupt Watchdog Timer (IWDT)** or lower-level watchdog
+- `WiFi.mode(WIFI_AP)` in Arduino-ESP32 framework blocks interrupts or causes excessive ISR latency
+- IWDT monitors ISR execution time and triggers reset if ISRs are blocked too long
+- This is a fundamental issue with the Arduino WiFi library on ESP32-S3
+
+### Camera Stop Issue (Resolved - But Irrelevant)
+
+**Finding**: Camera stop (`camera_stop()` → `esp_camera_deinit()`) **itself** causes buffer overflow and reset:
+```
+[CAM] Stopping camera (deinit) before WiFi init...
+[DBG-CAM] Yielding to IDLE task before esp_camera_deinit() at 29082 ms
+cam_hal: EV-EOF-OVF
+cam_hal: EV-VSYNC-OVF (multiple)
+rst:0x8 (TG1WDT_SYS_RST)
+```
+
+**Why**: Camera HAL continues generating VSYNC/EOF interrupts during deinit, buffers overflow, watchdog triggers.
+
+**Resolution**: Removed camera stop entirely. However, this is **irrelevant** because the WiFi reset occurs even with camera completely disabled.
+
+### All Attempted Solutions (Complete List)
+
+| # | Solution | Status | Notes |
+|---|----------|--------|-------|
+| 1-13 | Various watchdog/camera approaches | ❌ FAILED | See earlier sections |
+| 14 | Stop camera before WiFi init | ❌ FAILED | Camera deinit itself causes buffer overflow |
+| 15 | Watchdog delete/re-add around WiFi calls | ❌ FAILED | Causes immediate reset (no tasks registered) |
+| 16 | IDLE task yielding (vTaskDelay) | ❌ FAILED | Still resets |
+| 17 | Disable camera entirely | ❌ FAILED | Still resets - not a camera issue |
+| 18 | Feed watchdog (not delete) before WiFi | ❌ FAILED | Still resets - likely IWDT not TWDT |
+| 19 | All of above combined | ❌ FAILED | Reset persists regardless of configuration |
+
+### Current Status: UNRESOLVED
+
+**Conclusion**: The Arduino-ESP32 `WiFi.mode(WIFI_AP)` call on ESP32-S3 has a **fundamental incompatibility** that triggers watchdog resets regardless of:
+- Camera state (enabled/disabled)
+- Watchdog timeout settings
+- Task registration state
+- IDLE task yielding
+- Settling delays
+
+**Likely root cause**: Interrupt Watchdog Timer (IWDT) triggered by excessive ISR latency during WiFi radio initialization.
+
+### Recommended Solutions
+
+1. **Use ESP32-S3 as UART bridge only** (no WiFi, no camera)
+   - Simple serial passthrough between Arduino UNO and USB
+   - Eliminates WiFi initialization entirely
+
+2. **Use ESP-IDF native WiFi API** (bypass Arduino WiFi library)
+   - Lower-level control over WiFi initialization
+   - May have better interrupt/watchdog handling
+   - Requires significant refactoring
+
+3. **Use separate ESP32 module for WiFi** (not ESP32-S3)
+   - ESP32-WROOM or ESP32-C3 may have better Arduino WiFi compatibility
+   - ESP32-S3 focus on camera, separate module for WiFi
+
+4. **Accept WiFi limitation** and use alternative connectivity
+   - USB serial communication only
+   - External WiFi adapter
+   - Different hardware platform
+
+### Technical Notes
+
+- **ESP32-S3 revision**: v0.2
+- **Arduino-ESP32 framework**: 3.20014.231204 (2.0.14)
+- **ESP-IDF platform**: espressif32@6.5.0
+- **Watchdog timeout tested**: 60s, 120s
+- **Reset timing**: Immediate (within 10ms of WiFi.mode() call)
+- **Saved PC on reset**: 0x40377b61 (consistently same address)
 
