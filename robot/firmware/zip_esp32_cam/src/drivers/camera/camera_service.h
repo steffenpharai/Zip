@@ -120,5 +120,29 @@ bool camera_set_quality(int quality);
  */
 sensor_t* camera_get_sensor();
 
+/**
+ * Check if camera is currently running (initialized and operational).
+ * 
+ * @return true if camera is running, false otherwise
+ */
+bool camera_is_running();
+
+/**
+ * Stop camera (deinitialize) to free interrupts and DMA.
+ * Used before WiFi initialization to prevent interrupt contention.
+ * Camera config is saved for later resume.
+ * 
+ * @return true if stop succeeded, false otherwise
+ */
+bool camera_stop();
+
+/**
+ * Resume camera (reinitialize) after WiFi initialization completes.
+ * Uses saved config from previous initialization.
+ * 
+ * @return true if resume succeeded, false otherwise
+ */
+bool camera_resume();
+
 #endif // CAMERA_SERVICE_H
 

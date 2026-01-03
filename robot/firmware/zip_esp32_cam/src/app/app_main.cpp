@@ -16,6 +16,7 @@
 #include <Arduino.h>
 #include "esp_system.h"
 #include "esp_task_wdt.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
@@ -32,17 +33,22 @@
 
 // Service modules
 #include "drivers/uart/uart_bridge.h"
+#include "drivers/camera/camera_service.h"
 #include "net/net_service.h"
 #include "web/web_server.h"
 #include "config/safe_mode.h"
+#include "app/task_architecture.h"
+
+static const char* TAG = "MAIN";
 
 // ============================================================================
-// Global State
+// Global State (moved to task_architecture.cpp)
 // ============================================================================
-static int s_tcp_server_fd = -1;  // TCP server socket file descriptor
-static int s_tcp_client_fd = -1;  // TCP client socket file descriptor
-static String wifiName;
-static bool clientConnected = false;
+// TCP server/client handles are now managed by network_camera task
+// These are declared extern in task_architecture.h
+extern int s_tcp_server_fd;
+extern int s_tcp_client_fd;
+extern bool s_servers_started;
 
 // ============================================================================
 // Boot Banner
@@ -168,7 +174,6 @@ static void handleTcpClientNonBlocking() {
                 fcntl(new_client_fd, F_SETFL, flags | O_NONBLOCK);
                 
                 s_tcp_client_fd = new_client_fd;
-                clientConnected = true;
                 wasConnected = true;
                 LOG_I("TCP", "Client connected");
                 rxBuffer = "";
@@ -184,7 +189,7 @@ static void handleTcpClientNonBlocking() {
                 wasConnected = false;
                 uart_tx_string("{\"N\":100}");  // Stop command
             }
-            clientConnected = false;
+            // Client disconnected
             return;
         }
     }
@@ -197,7 +202,7 @@ static void handleTcpClientNonBlocking() {
             // Client disconnected
             close(s_tcp_client_fd);
             s_tcp_client_fd = -1;
-            clientConnected = false;
+            // Client disconnected
             if (wasConnected) {
                 wasConnected = false;
                 uart_tx_string("{\"N\":100}");  // Stop command
@@ -211,6 +216,7 @@ static void handleTcpClientNonBlocking() {
     int readCount = 0;
     char readBuffer[256];
     
+    esp_task_wdt_reset();  // Feed watchdog before TCP read loop
     while (readCount < MAX_READ_BYTES) {
         int bytes_read = recv(s_tcp_client_fd, readBuffer + readCount, MAX_READ_BYTES - readCount, MSG_DONTWAIT);
         if (bytes_read <= 0) {
@@ -221,7 +227,7 @@ static void handleTcpClientNonBlocking() {
                 // Error or connection closed
                 close(s_tcp_client_fd);
                 s_tcp_client_fd = -1;
-                clientConnected = false;
+                // Client disconnected
                 if (wasConnected) {
                     wasConnected = false;
                     uart_tx_string("{\"N\":100}");  // Stop command
@@ -257,7 +263,15 @@ static void handleTcpClientNonBlocking() {
         }
         
         readCount += bytes_read;
+        
+        // Feed watchdog periodically during read loop (every 64 bytes)
+        if (readCount % 64 == 0) {
+            esp_task_wdt_reset();
+        }
     }
+    
+    // Feed watchdog before UART->TCP pump
+    esp_task_wdt_reset();
     
     // Pump UART->TCP, bounded
     const int MAX_UART_BYTES = 256;
@@ -278,6 +292,11 @@ static void handleTcpClientNonBlocking() {
             }
             txBuffer = "";
         }
+        
+        // Feed watchdog periodically during UART pump (every 64 bytes)
+        if (uartCount % 64 == 0) {
+            esp_task_wdt_reset();
+        }
     }
     
     // Heartbeat tick (non-blocking check)
@@ -295,25 +314,29 @@ static void handleTcpClientNonBlocking() {
         }
         
         if (heartbeatMissed > CONFIG_HEARTBEAT_TIMEOUT_COUNT) {
+            esp_task_wdt_reset();  // Feed watchdog before LOG_W
             LOG_W("TCP", "Heartbeat timeout");
+            esp_task_wdt_reset();  // Feed watchdog after LOG_W
             uart_tx_string("{\"N\":100}");  // Stop command
             if (s_tcp_client_fd >= 0) {
                 close(s_tcp_client_fd);
                 s_tcp_client_fd = -1;
             }
-            clientConnected = false;
+            // Client disconnected
             return;
         }
         
         // Check if device disconnected from WiFi
         if (net_get_station_count() == 0) {
+            esp_task_wdt_reset();  // Feed watchdog before LOG_W
             LOG_W("TCP", "No WiFi clients");
+            esp_task_wdt_reset();  // Feed watchdog after LOG_W
             uart_tx_string("{\"N\":100}");  // Stop command
             if (s_tcp_client_fd >= 0) {
                 close(s_tcp_client_fd);
                 s_tcp_client_fd = -1;
             }
-            clientConnected = false;
+            // Client disconnected
             return;
         }
         
@@ -418,7 +441,7 @@ static void handleFactoryTest() {
     if (net_get_station_count() > 0) {
         // Client connected - LED solid
         digitalWrite(LED_STATUS_GPIO, LOW);
-        if (clientConnected) {
+        if (s_tcp_client_fd >= 0) {
             uart_tx_string("{WA_OK}");
         }
     } else {
@@ -434,8 +457,7 @@ static void handleFactoryTest() {
 // ============================================================================
 // Setup
 // ============================================================================
-// Static flag to track if web/TCP servers have been started
-static bool s_servers_started = false;
+// s_servers_started is now managed in task_architecture.cpp
 
 void setup() {
     unsigned long setup_start = millis();
@@ -452,10 +474,11 @@ void setup() {
     
     Serial.printf("[DBG-SETUP] setup() started at %lu ms\n", setup_start);
     
-    // Initialize watchdog with standard timeout
-    esp_err_t wdt_init_result = esp_task_wdt_init(CONFIG_WDT_INIT_TIMEOUT_S, true);
-    Serial.printf("[DBG-SETUP] Initialized watchdog with %d second timeout (result=0x%x) at %lu ms\n", 
-                  CONFIG_WDT_INIT_TIMEOUT_S, wdt_init_result, millis());
+    // Initialize watchdog with extended timeout for initialization phase
+    // Production fix: Use 60-second timeout during init to accommodate blocking WiFi calls
+    esp_err_t wdt_init_result = esp_task_wdt_init(60, true);  // 60 seconds for init phase
+    Serial.printf("[DBG-SETUP] Initialized watchdog with 60 second timeout (result=0x%x) at %lu ms\n", 
+                  wdt_init_result, millis());
     
     // Register main task with watchdog to ensure it's monitored
     esp_err_t wdt_add_result = esp_task_wdt_add(NULL);
@@ -485,31 +508,37 @@ void setup() {
     // Print boot banner
     print_boot_banner();
     
-    // Camera initialization removed for WiFi debugging
-    
-    // Initialize UART bridge
-#if ENABLE_UART
-    LOG_I("INIT", "Initializing UART bridge...");
-    uart_init();
+    // PRODUCTION FIX: Initialize camera first, then stop before WiFi init
+    // Camera must be initialized to save config for resume after WiFi init
+#if ENABLE_CAMERA
+    ESP_LOGI(TAG, "Initializing camera (synchronous)...");
+    esp_task_wdt_reset();  // Feed watchdog before camera init
+    if (camera_init()) {
+        ESP_LOGI(TAG, "Camera: OK");
+        // Camera is now initialized - it will be stopped before WiFi init in net_tick()
+        // This allows camera config to be saved for resume after WiFi init
+    } else {
+        ESP_LOGW(TAG, "Camera init failed: %s (continuing without camera)", camera_last_error());
+    }
+    esp_task_wdt_reset();  // Feed watchdog after camera init
+#else
+    ESP_LOGI(TAG, "Camera disabled by build config");
 #endif
     
     // Initialize WiFi (non-blocking state machine)
-    LOG_I("INIT", "Starting WiFi Access Point initialization (async)...");
+    ESP_LOGI(TAG, "Starting WiFi Access Point initialization (async)...");
     if (net_init_sync()) {
-        LOG_I("INIT", "WiFi initialization started - will complete in loop()");
+        ESP_LOGI(TAG, "WiFi initialization started - will complete in network_camera task");
     } else {
-        LOG_E("INIT", "WiFi init start failed: %s", net_last_error());
-        LOG_W("INIT", "Continuing without WiFi (safe mode)");
+        ESP_LOGE(TAG, "WiFi init start failed: %s", net_last_error());
+        ESP_LOGW(TAG, "Continuing without WiFi (safe mode)");
     }
     
-    // Get WiFi name for status display
-    wifiName = net_get_mac_suffix();
-    
-    // Send factory init to UNO (after boot guard)
-    // This will be buffered and sent when UART is ready
-#if ENABLE_UART
-    uart_tx_string("{Factory}");
-#endif
+    // Initialize FreeRTOS task architecture
+    ESP_LOGI(TAG, "Initializing FreeRTOS task architecture...");
+    if (!task_architecture_init()) {
+        ESP_LOGE(TAG, "Failed to initialize task architecture - system may be unstable");
+    }
     
     // LED OFF = ready
     digitalWrite(LED_STATUS_GPIO, HIGH);
@@ -520,90 +549,43 @@ void setup() {
 #endif
     
     unsigned long setup_end = millis();
-    Serial.printf("[DBG-SETUP] setup() completed at %lu ms (total duration: %lu ms)\n", 
-                  setup_end, setup_end - setup_start);
+    ESP_LOGI(TAG, "setup() completed in %lu ms", setup_end - setup_start);
     
     // Print ready message
-    Serial.println("==========================================");
-    Serial.println("Initialization complete!");
+    ESP_LOGI(TAG, "==========================================");
+    ESP_LOGI(TAG, "Initialization complete!");
     if (net_is_ok()) {
-        Serial.printf("  WiFi: %s\n", net_get_ssid().c_str());
-        Serial.printf("  IP: %s\n", net_get_ip().toString().c_str());
-        Serial.printf("  Health: http://%s/health\n", net_get_ip().toString().c_str());
+        ESP_LOGI(TAG, "  WiFi: %s", net_get_ssid().c_str());
+        ESP_LOGI(TAG, "  IP: %s", net_get_ip().toString().c_str());
+        ESP_LOGI(TAG, "  Health: http://%s/health", net_get_ip().toString().c_str());
     }
-    Serial.println("  Camera: Disabled (WiFi debugging)");
-    Serial.printf("  WiFi: %s\n", net_is_ok() ? "OK" : net_last_error());
-    Serial.printf("  UART: %s\n", uart_is_ok() ? "OK" : "Waiting for boot guard");
-    Serial.println("==========================================");
+#if ENABLE_CAMERA
+    ESP_LOGI(TAG, "  Camera: %s", camera_is_ok() ? "OK (will resume after WiFi)" : camera_last_error());
+#else
+    ESP_LOGI(TAG, "  Camera: Disabled");
+#endif
+    ESP_LOGI(TAG, "  WiFi: %s", net_is_ok() ? "OK" : net_last_error());
+    ESP_LOGI(TAG, "  UART: Interrupt-driven (queues)");
+    ESP_LOGI(TAG, "==========================================");
 }
 
 // ============================================================================
-// Main Loop
+// Main Loop - Minimal Heartbeat
 // ============================================================================
+// PRODUCTION FIX: loop() is now minimal - all logic moved to FreeRTOS tasks
+// This ensures real-time safety: motor commands cannot be blocked by WiFi/Logging
+// 
+// Task Architecture:
+//   - Task A (CMD_CONTROL): High priority, Core 1 - UART bridge, motor commands
+//   - Task B (NETWORK_CAMERA): Medium priority, Core 0 - WiFi, TCP/IP, camera
+//   - Task C (LOGGING): Low priority, Core 1 - ESP_LOG output
 void loop() {
-    // Feed watchdog every loop iteration to prevent TG1WDT starvation
+    // Minimal heartbeat - feed watchdog and yield
+    // All actual work is done in FreeRTOS tasks with proper priorities
     esp_task_wdt_reset();
     
-    // Advance WiFi initialization state machine
-    if (!net_is_ok() && net_status() != NetStatus::ERROR && net_status() != NetStatus::TIMEOUT) {
-        net_tick();
-        
-        // When WiFi becomes ready, start servers
-        if (net_is_ok() && !s_servers_started) {
-            LOG_I("INIT", "WiFi ready - starting web and TCP servers...");
-            
-            // Start web servers (TCP/IP stack is now ready)
-            if (ENABLE_HEALTH_ENDPOINT) {
-                if (web_server_init()) {
-                    LOG_I("INIT", "Web servers started");
-                } else {
-                    LOG_E("INIT", "Web server init failed: %s", web_server_last_error());
-                }
-            }
-            
-            // TCP server already started in earlier replacement (socket-based)
-            // Server socket is created and listening
-            
-            s_servers_started = true;
-            LOG_I("INIT", "All servers started");
-        }
-    }
-    
-    // Handle Serial commands from bridge (non-blocking, bounded)
-    static String serialBuffer = "";
-    const int MAX_SERIAL_BYTES = 64;  // Bounded work per loop iteration
-    int serialCount = 0;
-    
-    while (Serial.available() && serialCount < MAX_SERIAL_BYTES) {
-        char c = Serial.read();
-        serialCount++;
-        
-        if (c == '{') {
-            serialBuffer = "{";
-        } else if (serialBuffer.length() > 0) {
-            serialBuffer += c;
-            
-            if (c == '}') {
-                // Complete JSON command received
-                handleBridgeCommand(serialBuffer);
-                serialBuffer = "";
-            }
-        }
-    }
-    
-    // Process UART bridge (lightweight)
-    uart_tick();
-    
-    // Handle TCP clients (robot commands) - non-blocking
-    // Only process if servers are started and WiFi is ready
-    if (s_servers_started && net_is_ok() && s_tcp_server_fd >= 0) {
-        handleTcpClientNonBlocking();
-    }
-    
-    // Handle factory test commands
-    handleFactoryTest();
-    
-    // Yield to FreeRTOS scheduler - use vTaskDelay for proper yielding
-    vTaskDelay(pdMS_TO_TICKS(1));
+    // Yield to FreeRTOS scheduler
+    // Tasks run independently with proper priorities and core assignments
+    vTaskDelay(pdMS_TO_TICKS(100));  // 100ms heartbeat
 }
 

@@ -16,9 +16,11 @@
 // ============================================================================
 
 // External clock frequency for OV3660
-// 20 MHz is stable; some boards support up to 24 MHz
+// PRODUCTION FIX: Reduced to 10 MHz to prevent EMI interference with WiFi antenna
+// 20 MHz can cause EMI noise that interferes with WiFi on ESP32-S3, leading to reset loops
+// 10 MHz is stable and reduces EMI while maintaining acceptable frame rates for robot control
 #ifndef CONFIG_XCLK_HZ
-#define CONFIG_XCLK_HZ              20000000    // 20 MHz
+#define CONFIG_XCLK_HZ              10000000    // 10 MHz (reduced from 20 MHz for EMI reduction)
 #endif
 
 // Default frame size (QVGA = 320x240, safe for all configurations)
@@ -141,9 +143,11 @@
 // ============================================================================
 
 // Watchdog timeout during initialization
-// Set to 5 seconds for camera loop to ensure robot resets if frame capture stalls
+// Increased to 15 seconds to accommodate Serial.printf() blocking and instrumentation
+// Serial.printf() can block if buffer is full, so we need margin for debug logs
+// After initialization, tasks should feed watchdog every 1-2 seconds
 #ifndef CONFIG_WDT_INIT_TIMEOUT_S
-#define CONFIG_WDT_INIT_TIMEOUT_S   5   // 5 seconds (reduced from 30s for camera safety)
+#define CONFIG_WDT_INIT_TIMEOUT_S   15  // 15 seconds (increased from 5s for Serial blocking margin)
 #endif
 
 // Watchdog timeout during runtime

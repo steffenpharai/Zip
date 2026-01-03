@@ -126,6 +126,12 @@ static_assert(CAM_Y2_GPIO != CAM_Y7_GPIO, "Camera Y2 conflicts with Y7");
 static_assert(CAM_Y2_GPIO != CAM_Y8_GPIO, "Camera Y2 conflicts with Y8");
 static_assert(CAM_Y2_GPIO != CAM_Y9_GPIO, "Camera Y2 conflicts with Y9");
 
+// PRODUCTION FIX: Ensure PCLK (GPIO 13) does not conflict with D6 data line (GPIO 48)
+// PCLK is a dedicated hardware signal and must never be shared with data lines
+// If these overlap, the CPU will trigger watchdog reset as it enters "Live-lock"
+// trying to process constant stream of false clock interrupts
+static_assert(CAM_PCLK_GPIO != CAM_Y8_GPIO, "PCLK (GPIO 13) must not conflict with D6 data line (GPIO 48)");
+
 // ============================================================================
 // Board Capabilities Structure
 // ============================================================================

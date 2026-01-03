@@ -100,9 +100,18 @@
 #define LOG_V(tag, fmt, ...) do {} while(0)
 #endif
 
-#define LOG_I(tag, fmt, ...) Serial.printf("[%s] " fmt "\n", tag, ##__VA_ARGS__)
-#define LOG_W(tag, fmt, ...) Serial.printf("[%s] WARN: " fmt "\n", tag, ##__VA_ARGS__)
-#define LOG_E(tag, fmt, ...) Serial.printf("[%s] ERROR: " fmt "\n", tag, ##__VA_ARGS__)
+// Safe logging macros that check Serial buffer space to prevent blocking
+// Skip logging if buffer has less than 100 bytes available (prevents blocking)
+// Note: Watchdog reset should be done at call site, not in macro (not available everywhere)
+#define SAFE_SERIAL_PRINTF(fmt, ...) do { \
+    if (Serial.availableForWrite() >= 100) { \
+        Serial.printf(fmt, ##__VA_ARGS__); \
+    } \
+} while(0)
+
+#define LOG_I(tag, fmt, ...) SAFE_SERIAL_PRINTF("[%s] " fmt "\n", tag, ##__VA_ARGS__)
+#define LOG_W(tag, fmt, ...) SAFE_SERIAL_PRINTF("[%s] WARN: " fmt "\n", tag, ##__VA_ARGS__)
+#define LOG_E(tag, fmt, ...) SAFE_SERIAL_PRINTF("[%s] ERROR: " fmt "\n", tag, ##__VA_ARGS__)
 
 #endif // BUILD_CONFIG_H
 

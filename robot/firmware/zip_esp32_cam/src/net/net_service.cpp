@@ -18,6 +18,7 @@
 #include "esp_task_wdt.h"
 #include "config/build_config.h"
 #include "config/runtime_config.h"
+#include "drivers/camera/camera_service.h"
 
 // ============================================================================
 // WiFi Initialization State Machine
@@ -294,6 +295,14 @@ bool net_start() {
 }
 
 bool net_tick() {
+    // #region agent log - Hypothesis C: Track net_tick() entry and state
+    static unsigned long s_last_tick_log = 0;
+    if (millis() - s_last_tick_log > 1000) {  // Log every second during tick
+        Serial.printf("[DBG-NET-TICK] net_tick() called: state=%d, status=%d, millis=%lu\n",
+                     (int)s_init_state, (int)s_status, millis());
+        s_last_tick_log = millis();
+    }
+    // #endregion
     
     // Check for software timeout (robust boot timeout)
     if (s_init_state != WiFiInitState::IDLE && 
@@ -337,6 +346,23 @@ bool net_tick() {
                 LOG_W("NET", "Continuing boot WITHOUT WiFi (safe mode)");
                 return false;
             }
+            
+            // PRODUCTION FIX: Stop camera before WiFi initialization
+            // Camera HAL interrupts can starve CPU during WiFi radio power-on
+            if (camera_is_running()) {
+                LOG_I("NET", "Stopping camera before WiFi initialization...");
+                if (!camera_stop()) {
+                    LOG_W("NET", "Camera stop failed - continuing WiFi init anyway");
+                } else {
+                    LOG_I("NET", "Camera stopped successfully - WiFi init can proceed");
+                }
+            } else {
+                LOG_I("NET", "Camera already stopped - WiFi init can proceed");
+            }
+            
+            // Clear Watchdog and yield to allow IDLE task to feed Group 0
+            esp_task_wdt_reset();
+            vTaskDelay(pdMS_TO_TICKS(100));  // Yield 100ms to IDLE task
             
             // Start WiFi initialization task if not already started
             // This task is NOT registered with watchdog to avoid resets during blocking calls
@@ -437,20 +463,41 @@ bool net_tick() {
             
             // Wait for AP to be ready (check event flag or wait 1 second)
             if (s_ap_started || wait_elapsed >= 1000) {
+                // PRODUCTION FIX: Resume camera after WiFi is stable
+                // Camera was stopped before WiFi init to prevent interrupt contention
+                LOG_I("NET", "Resuming camera after WiFi init...");
+                if (!camera_resume()) {
+                    LOG_W("NET", "Camera resume failed - continuing without camera");
+                } else {
+                    LOG_I("NET", "Camera resumed successfully");
+                }
                 // Get IP address
                 esp_netif_ip_info_t ip_info;
                 esp_err_t ret = esp_netif_get_ip_info(s_ap_netif, &ip_info);
                 
                 if (ret == ESP_OK) {
+                    // #region agent log - Hypothesis D: Track status change to AP_ACTIVE
+                    Serial.printf("[DBG-NET-TICK] Setting status to AP_ACTIVE at %lu ms\n", millis());
+                    // #endregion
                     s_init_state = WiFiInitState::DONE;
                     s_status = NetStatus::AP_ACTIVE;
                     s_start_time = millis();
                     s_error_message = "OK";
                     
+                    // #region agent log - Hypothesis D: Verify status after setting
+                    Serial.printf("[DBG-NET-TICK] Status set: state=%d, status=%d, net_is_ok()=%d\n",
+                                 (int)s_init_state, (int)s_status, (s_status == NetStatus::AP_ACTIVE));
+                    // #endregion
+                    
                     char ip_str[16];
                     snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
                     LOG_I("NET", "AP IP: %s", ip_str);
                     LOG_I("NET", "WiFi Access Point ready");
+                    
+                    // #region agent log - Hypothesis A: Track Serial.flush() timing
+                    unsigned long before_serial_flush = millis();
+                    Serial.printf("[DBG-NET] About to call Serial.flush() at %lu ms\n", before_serial_flush);
+                    // #endregion
                     
                     // Print connection instructions
                     Serial.println(":----------------------------:");
@@ -460,7 +507,17 @@ bool net_tick() {
                     
                     // Send READY marker to bridge (signals WiFi is ready and ESP32 can handle commands)
                     Serial.println("READY");
+                    
+                    // #region agent log - Hypothesis A: Measure Serial.flush() duration
                     Serial.flush();
+                    unsigned long after_serial_flush = millis();
+                    unsigned long flush_duration = after_serial_flush - before_serial_flush;
+                    Serial.printf("[DBG-NET] Serial.flush() completed at %lu ms (duration=%lu ms)\n",
+                                 after_serial_flush, flush_duration);
+                    if (flush_duration > 100) {
+                        Serial.printf("[DBG-NET] WARNING: Serial.flush() took %lu ms (may be blocking)\n", flush_duration);
+                    }
+                    // #endregion
                     
                     return false;  // Done
                 } else {

@@ -125,6 +125,10 @@ bool camera_init() {
               CONFIG_JPEG_QUALITY, CONFIG_FB_COUNT_NO_PSRAM);
     }
     
+    // Save config for resume after stop (save after all fields are set)
+    s_saved_config = config;
+    s_config_saved = true;
+    
     // #region agent log - Hypothesis A: Camera init start
     unsigned long before_esp_init = millis();
     size_t heap_before = ESP.getFreeHeap();
@@ -203,6 +207,11 @@ bool camera_init() {
         sensor->set_vflip(sensor, 0);
         sensor->set_hmirror(sensor, 0);
         
+        // Save sensor settings for resume after stop
+        s_saved_framesize = (framesize_t)sensor->status.framesize;
+        s_saved_vflip = sensor->status.vflip;
+        s_saved_hmirror = sensor->status.hmirror;
+        
         // Detect sensor type (OV3660 or OV2640)
         const char* sensor_name = "Unknown";
         if (sensor->id.PID == OV3660_PID) {
@@ -211,9 +220,15 @@ bool camera_init() {
             sensor_name = "OV2640";
         }
         LOG_I("CAM", "Sensor configured: %s (VGA 640x480)", sensor_name);
+        LOG_I("CAM", "Sensor settings saved: framesize=%d, vflip=%d, hmirror=%d",
+              s_saved_framesize, s_saved_vflip, s_saved_hmirror);
         
     } else {
         LOG_W("CAM", "Could not get sensor handle");
+        // Set defaults if sensor not available
+        s_saved_framesize = FRAMESIZE_VGA;
+        s_saved_vflip = 0;
+        s_saved_hmirror = 0;
     }
     
     s_status = CameraStatus::OK;
@@ -311,6 +326,108 @@ sensor_t* camera_get_sensor() {
         return NULL;
     }
     return esp_camera_sensor_get();
+}
+
+// ============================================================================
+// Camera State Management (Production Pattern: Stop-Init-Resume)
+// ============================================================================
+
+// Static storage for camera config to enable resume after stop
+static camera_config_t s_saved_config = {};
+static bool s_config_saved = false;
+static framesize_t s_saved_framesize = FRAMESIZE_VGA;
+static int s_saved_vflip = 0;
+static int s_saved_hmirror = 0;
+
+bool camera_is_running() {
+    return s_status == CameraStatus::OK;
+}
+
+bool camera_stop() {
+#if !ENABLE_CAMERA
+    LOG_I("CAM", "Camera disabled - skip stop");
+    return true;
+#else
+    if (s_status != CameraStatus::OK) {
+        LOG_I("CAM", "Camera not running - skip stop");
+        return true;  // Already stopped
+    }
+    
+    LOG_I("CAM", "Stopping camera (deinit) before WiFi init...");
+    unsigned long stop_start = millis();
+    
+    // Sensor settings should already be saved during camera_init()
+    // Just verify they're saved (they should be from init)
+    if (!s_config_saved) {
+        LOG_W("CAM", "No saved config - sensor settings may not be restored on resume");
+    }
+    
+    // Deinitialize camera - stops DMA and interrupts
+    esp_err_t ret = esp_camera_deinit();
+    if (ret != ESP_OK) {
+        LOG_E("CAM", "Camera deinit failed: %s", esp_err_to_name_safe(ret));
+        s_status = CameraStatus::INIT_FAILED;
+        s_error_message = "Deinit failed";
+        return false;
+    }
+    
+    unsigned long stop_duration = millis() - stop_start;
+    s_status = CameraStatus::NOT_INITIALIZED;
+    s_error_message = "Stopped";
+    LOG_I("CAM", "Camera stopped (deinit) successfully (took %lu ms)", stop_duration);
+    
+    return true;
+#endif
+}
+
+bool camera_resume() {
+#if !ENABLE_CAMERA
+    LOG_I("CAM", "Camera disabled - skip resume");
+    return true;
+#else
+    if (s_status == CameraStatus::OK) {
+        LOG_I("CAM", "Camera already running - skip resume");
+        return true;  // Already running
+    }
+    
+    LOG_I("CAM", "Resuming camera (reinit) after WiFi init...");
+    unsigned long resume_start = millis();
+    
+    // Re-initialize camera using saved config
+    if (!s_config_saved) {
+        LOG_E("CAM", "No saved config - cannot resume camera");
+        s_status = CameraStatus::INIT_FAILED;
+        s_error_message = "No saved config";
+        return false;
+    }
+    
+    // Re-initialize camera with saved config
+    esp_err_t ret = esp_camera_init(&s_saved_config);
+    if (ret != ESP_OK) {
+        LOG_E("CAM", "Camera reinit failed: %s", esp_err_to_name_safe(ret));
+        s_status = CameraStatus::INIT_FAILED;
+        s_error_message = esp_err_to_name_safe(ret);
+        s_last_error = ret;
+        return false;
+    }
+    
+    // Restore sensor settings
+    sensor_t* sensor = esp_camera_sensor_get();
+    if (sensor) {
+        sensor->set_framesize(sensor, s_saved_framesize);
+        sensor->set_vflip(sensor, s_saved_vflip);
+        sensor->set_hmirror(sensor, s_saved_hmirror);
+        LOG_I("CAM", "Restored sensor settings: framesize=%d, vflip=%d, hmirror=%d",
+              s_saved_framesize, s_saved_vflip, s_saved_hmirror);
+    }
+    
+    unsigned long resume_duration = millis() - resume_start;
+    s_status = CameraStatus::OK;
+    s_error_message = "OK";
+    LOG_I("CAM", "Camera resumed (reinit) successfully (took %lu ms)", resume_duration);
+    
+    return true;
+#endif
 }
 
 
