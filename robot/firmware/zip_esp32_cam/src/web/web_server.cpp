@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include "esp_http_server.h"
 #include "esp_camera.h"
+#include "esp_task_wdt.h"
 #include "config/build_config.h"
 #include "config/runtime_config.h"
 #include "drivers/camera/camera_service.h"
@@ -96,6 +97,10 @@ static esp_err_t stream_handler(httpd_req_t *req) {
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     
     while (true) {
+        // #region agent log - Hypothesis E: Feed watchdog in stream loop
+        esp_task_wdt_reset();  // Feed watchdog in stream loop
+        // #endregion
+        
         fb = camera_capture();
         if (!fb) {
             LOG_W("WEB", "Stream capture failed");

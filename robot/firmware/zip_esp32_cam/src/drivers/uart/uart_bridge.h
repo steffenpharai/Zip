@@ -2,11 +2,15 @@
  * UART Bridge Service - Interface
  * 
  * Provides UART communication with the robot shield (Arduino UNO).
- * Implements boot-safe GPIO0 handling to prevent boot mode issues.
+ * Uses WROVER-compatible UART0 pinout for shield compatibility.
  * 
- * Hardware: ELEGOO shield P8 header
- *   P8 Pin 1 = GPIO1 (TX)
- *   P8 Pin 2 = GPIO0 (RX)
+ * Hardware: ELEGOO SmartRobot-Shield (designed for ESP32-WROVER)
+ *   TX = GPIO1 (ESP32 → Arduino RX)
+ *   RX = GPIO3 (Arduino TX → ESP32)
+ * 
+ * Note: The shield P8 header labels "0(RX)" and "1(TX)" refer to
+ * Arduino D0/D1, not ESP32 GPIO numbers. The physical routing
+ * matches ESP32-WROVER UART0: GPIO1 (TX) and GPIO3 (RX).
  */
 
 #ifndef UART_BRIDGE_H
@@ -36,9 +40,7 @@ struct UartStats {
 
 /**
  * Initialize the UART bridge.
- * Implements boot-safe GPIO0 handling:
- * - Checks GPIO0 state at startup
- * - Delays UART init until boot guard window expires
+ * Configures Serial2 with WROVER-compatible pins (GPIO1/GPIO3).
  * 
  * @return true if initialization succeeded
  */
@@ -53,9 +55,10 @@ bool uart_is_ok();
 
 /**
  * Check if boot guard window has expired.
- * UART RX is disabled during boot guard to protect GPIO0.
+ * Legacy function - always returns true with GPIO3 (non-strapping pin).
+ * Retained for API compatibility.
  * 
- * @return true if boot guard has expired and RX is active
+ * @return true (always, since GPIO3 doesn't need boot protection)
  */
 bool uart_boot_guard_expired();
 

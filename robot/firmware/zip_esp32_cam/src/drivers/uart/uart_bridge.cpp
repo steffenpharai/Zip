@@ -1,15 +1,20 @@
 /**
  * UART Bridge Service - Implementation
  * 
- * Boot-safe UART communication with GPIO0 protection.
- * GPIO0 is a boot strapping pin - if held low during reset,
- * ESP32-S3 enters download mode. This driver implements a
- * boot guard window to prevent external devices from causing issues.
+ * UART communication bridge to the robot shield (Arduino UNO).
+ * Uses GPIO33 (RX) and GPIO1 (TX) as defined in board_esp32s3_elegoo_cam.h.
+ * 
+ * Pin assignments (ESP32-S3-WROOM-1):
+ *   - RX: GPIO33 (ELEGOO-specific assignment for bridge to Arduino UNO)
+ *   - TX: GPIO1 (Standard TX pin for serial communication)
+ * 
+ * Note: Previous versions used GPIO0 for RX, but GPIO0 is a boot
+ * strapping pin and does not work reliably as UART RX on ESP32-S3.
+ * GPIO33 is the correct ELEGOO pinout for the Smart Robot Car shield.
  */
 
 #include "uart_bridge.h"
 #include <Arduino.h>
-#include "driver/gpio.h"
 #include "board/board_esp32s3_elegoo_cam.h"
 #include "config/build_config.h"
 #include "config/runtime_config.h"
@@ -85,74 +90,68 @@ bool uart_init() {
     LOG_I("UART", "RX=GPIO%d TX=GPIO%d @ %d baud",
           UART_RX_GPIO, UART_TX_GPIO, CONFIG_UART_BAUD);
     
-    // Check GPIO0 state before initializing
-    // GPIO0 should be high for normal boot
-    gpio_config_t io_conf = {};
-    io_conf.pin_bit_mask = (1ULL << UART_RX_GPIO);
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    gpio_config(&io_conf);
+    // Small delay for GPIO and Arduino UNO to settle after power-on
+    delay(50);
     
-    // Small delay for GPIO to settle
-    delay(10);
-    
-    int gpio0_level = gpio_get_level((gpio_num_t)UART_RX_GPIO);
-    if (gpio0_level == 0) {
-        LOG_W("UART", "WARNING: GPIO0 is LOW at boot - external device may interfere!");
-        LOG_W("UART", "Boot guard window: %d ms", CONFIG_BOOT_GUARD_MS);
-    } else {
-        LOG_I("UART", "GPIO0 is HIGH - normal boot");
-    }
-    
-    // Don't initialize Serial2 yet - wait for boot guard to expire
-    // This prevents issues with external devices driving GPIO0
-    LOG_I("UART", "Boot guard active for %d ms", CONFIG_BOOT_GUARD_MS);
+    // Initialize Serial2 with ELEGOO pinout (GPIO33/GPIO1)
+    // Note: Previous versions used GPIO0 for RX which doesn't work on ESP32-S3
+    // because GPIO0 is a boot strapping pin. GPIO33 is the correct ELEGOO pinout.
+    Serial2.begin(CONFIG_UART_BAUD, SERIAL_8N1, UART_RX_GPIO, UART_TX_GPIO);
     
     s_initialized = true;
+    s_boot_guard_expired = true;  // No boot guard needed for GPIO3
+    
+    LOG_I("UART", "Serial2 initialized on RX=GPIO%d TX=GPIO%d", 
+          UART_RX_GPIO, UART_TX_GPIO);
+    
+#if ENABLE_UART_LOOPBACK
+    LOG_I("UART", "Loopback test mode enabled");
+#endif
+    
     return true;
 #endif
 }
 
 // ============================================================================
-// Boot Guard Management
+// Boot Guard Management (Legacy - kept for API compatibility)
 // ============================================================================
+// Note: Boot guard was originally needed when using GPIO0 for RX.
+// With GPIO3, immediate initialization is safe. These functions are
+// retained for API compatibility but boot guard is always "expired".
+
 bool uart_boot_guard_expired() {
     return s_boot_guard_expired;
-}
-
-static void complete_uart_init() {
-    if (s_boot_guard_expired) {
-        return;
-    }
-    
-    // Initialize Serial2 with configured pins and baud rate
-    Serial2.begin(CONFIG_UART_BAUD, SERIAL_8N1, UART_RX_GPIO, UART_TX_GPIO);
-    
-    s_boot_guard_expired = true;
-    LOG_I("UART", "Boot guard expired - Serial2 active");
-    
-#if ENABLE_UART_LOOPBACK
-    LOG_I("UART", "Loopback test mode enabled");
-#endif
 }
 
 // ============================================================================
 // UART Tick (Main Loop Processing)
 // ============================================================================
+// #region agent log - Debug GPIO state
+static unsigned long s_last_debug_ms = 0;
+static uint32_t s_debug_rx_last = 0;
+// #endregion
+
 void uart_tick() {
     if (!s_initialized) {
         return;
     }
     
-    // Check if boot guard window has expired
-    if (!s_boot_guard_expired) {
-        if ((millis() - s_boot_start_time) >= CONFIG_BOOT_GUARD_MS) {
-            complete_uart_init();
-        }
-        return;
+    // #region agent log - Hypothesis C: Check if Serial2 has data available
+    int avail = Serial2.available();
+    if (avail > 0) {
+        Serial.printf("[DBG-RX] Serial2.available()=%d\n", avail);
     }
+    // Periodic debug every 5 seconds
+    if (millis() - s_last_debug_ms > 5000) {
+        s_last_debug_ms = millis();
+        if (s_stats.rx_bytes != s_debug_rx_last) {
+            Serial.printf("[DBG] RX changed: %lu -> %lu\n", s_debug_rx_last, s_stats.rx_bytes);
+            s_debug_rx_last = s_stats.rx_bytes;
+        } else {
+            Serial.printf("[DBG] RX stuck at %lu, TX=%lu\n", s_stats.rx_bytes, s_stats.tx_bytes);
+        }
+    }
+    // #endregion
     
     // Read available data into ring buffer
     while (Serial2.available() && !ring_buffer_full()) {
@@ -212,8 +211,10 @@ size_t uart_tx_string(const char* str) {
     size_t len = strlen(str);
     size_t written = uart_tx((const uint8_t*)str, len);
     
-    // Count as frame if it ends with }
+    // Add newline after JSON commands for Arduino compatibility
     if (len > 0 && str[len - 1] == '}') {
+        Serial2.write('\n');
+        written++;
         s_stats.tx_frames++;
     }
     

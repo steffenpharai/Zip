@@ -21,6 +21,7 @@ import {
 } from '../config/env.js';
 import { 
   isBootMarker, 
+  isReadyMarker,
   isTokenResponse,
   serializeCommand,
   buildHelloCommand,
@@ -331,6 +332,20 @@ export class SerialTransport {
         this.startHandshake();
       } else if (this._state === 'waiting_boot') {
         this.attemptHello();
+      }
+      return;
+    }
+    
+    // Check for WiFi ready marker
+    if (isReadyMarker(trimmed)) {
+      logger.log('handshake_step', { step: 'wifi_ready' });
+      // If waiting for boot or handshaking, proceed with hello
+      if (this._state === 'waiting_boot') {
+        // WiFi is ready, proceed with handshake
+        this.attemptHello();
+      } else if (this._state === 'handshaking') {
+        // READY marker confirms we can continue handshake
+        // Don't change state, just log - we're already handshaking
       }
       return;
     }

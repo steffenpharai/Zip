@@ -31,7 +31,7 @@ const envSchema = z.object({
   MAX_COMMANDS_PER_SEC: z.coerce.number().int().min(1).max(100).default(50),
   
   // Timeouts
-  HANDSHAKE_TIMEOUT_MS: z.coerce.number().int().min(500).max(5000).default(1500),
+  HANDSHAKE_TIMEOUT_MS: z.coerce.number().int().min(500).max(5000).default(5000),
   COMMAND_TIMEOUT_MS: z.coerce.number().int().min(100).max(5000).default(250),
   DIAGNOSTICS_COLLECT_MS: z.coerce.number().int().min(30).max(200).default(80),
   DTR_SETTLE_MS: z.coerce.number().int().min(300).max(2000).default(700),

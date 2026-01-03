@@ -92,7 +92,7 @@ public:
   
   InitState getState() const { return state; }
   uint8_t getWarnBits() const { return warnBits; }
-  bool isRunning() const { return (currentStep != STEP_IDLE && currentStep != STEP_COMPLETE); }
+  bool isRunning() const { return (currentStep != STEP_IDLE); }
   bool isDone() const { return (state == INIT_DONE || state == INIT_WARN); }
   
   // IMU yaw delta observed during spins (degrees * 10, e.g., 120 = 12.0°)

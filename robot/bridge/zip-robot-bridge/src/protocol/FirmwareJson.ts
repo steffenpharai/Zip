@@ -109,6 +109,12 @@ export function isBootMarker(line: string): boolean {
   return line.trim() === 'R';
 }
 
+export function isReadyMarker(line: string): boolean {
+  const trimmed = line.trim();
+  // Match "READY" or "[NET] READY" patterns
+  return trimmed === 'READY' || trimmed.endsWith(' READY') || trimmed.includes('[NET] READY');
+}
+
 export function isTokenResponse(line: string): boolean {
   return TOKEN_PATTERN.test(line.trim());
 }

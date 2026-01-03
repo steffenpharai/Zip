@@ -42,11 +42,11 @@ The firmware was refactored with correct ESP32-S3 GPIO assignments:
 | HREF | 7 | Horizontal reference |
 | PCLK | 13 | Pixel clock |
 
-**UART Pins (P8 Header on Robot Shield):**
+**UART Pins (WROVER-Compatible):**
 | Pin | GPIO | Notes |
 |-----|------|-------|
-| RX | 0 | Boot strapping pin - protected by boot guard |
-| TX | 1 | |
+| RX | 3 | WROVER UART0 RX (fixed from GPIO0) |
+| TX | 1 | WROVER UART0 TX |
 
 **LED Pin:**
 | Pin | GPIO | Notes |
@@ -65,7 +65,7 @@ src/
 │   ├── camera/
 │   │   └── camera_service.*   # Camera initialization & capture
 │   └── uart/
-│       └── uart_bridge.*      # UART with boot-safe GPIO0
+│       └── uart_bridge.*      # UART bridge (WROVER-compatible pins)
 ├── net/
 │   └── net_service.*          # WiFi AP management
 └── web/
@@ -74,7 +74,7 @@ src/
 
 ### Key Features
 
-1. **Boot-Safe UART**: GPIO0 is a boot strapping pin. The UART bridge implements a 1000ms boot guard window to prevent external devices from interfering with boot.
+1. **WROVER-Compatible UART**: Uses GPIO3 (RX) and GPIO1 (TX) to match the ESP32-WROVER pinout that the ELEGOO shield was designed for. See "UART RX Fix" section below.
 
 2. **Graceful Degradation**: Firmware continues running even if camera fails. WiFi, UART, and web server remain operational.
 
@@ -120,6 +120,43 @@ The ELEGOO firmware used M5STACK_WIDE pin definitions for ESP32-WROVER:
 
 ### Why ELEGOO's Original Firmware Worked
 The ELEGOO binary was compiled for ESP32-WROVER with an older Arduino framework that had lenient pin validation. The binary happened to run on ESP32-S3 hardware, but couldn't be rebuilt with modern toolchains.
+
+## UART RX Fix (January 2026)
+
+### Problem
+After the camera was fixed, UART communication was one-way only:
+- **TX worked**: ESP32 could send commands to Arduino UNO
+- **RX was dead**: ESP32 received no data from Arduino UNO
+
+### Root Cause
+The ELEGOO documentation and shield silkscreen labels "0(RX)" and "1(TX)" were misinterpreted as ESP32 GPIO numbers. They actually refer to **Arduino D0/D1**, not ESP32 GPIOs.
+
+The SmartRobot-Shield was designed for **ESP32-WROVER**, which uses:
+| Signal | WROVER GPIO | ESP32-S3 GPIO (original) |
+|--------|-------------|--------------------------|
+| TX | GPIO1 | GPIO1 ✓ (worked) |
+| RX | GPIO3 | GPIO0 ✗ (broken) |
+
+**GPIO0 is a boot strapping pin** on ESP32-S3. Using it for UART RX causes:
+- Boot mode issues if the line is low during reset
+- Unreliable UART reception on ESP32-S3
+
+### Solution
+Changed `UART_RX_GPIO` from `0` to `3` in `board_esp32s3_elegoo_cam.h`:
+
+```cpp
+// BEFORE (broken):
+#define UART_RX_GPIO  0   // Boot strap pin - doesn't work as UART RX
+
+// AFTER (fixed):
+#define UART_RX_GPIO  3   // WROVER-compatible UART0 RX
+```
+
+### Verification
+After the fix, the `/health` endpoint should show:
+- `uart_rx_bytes` incrementing when Arduino sends data
+- `uart_rx_frames` incrementing for complete JSON frames
+- Two-way UART communication restored
 
 ## References
 

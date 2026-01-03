@@ -27,8 +27,15 @@ npm run dev:local
 # Run integration tests (requires bridge running)
 npm run test:integration
 
+# Run integration tests with loopback (starts bridge automatically)
+npm run test:loopback
+
 # Health check
 npm run test:health
+
+# Smoke tests (requires bridge running)
+npm run test:smoke      # Drive/motion smoke test
+npm run test:sensor     # Sensor polling smoke test
 ```
 
 ## Architecture
@@ -108,7 +115,7 @@ Examples:
 
 ### Diagnostics Response (N=120)
 
-Returns multiple lines:
+Returns multiple lines (collected over `DIAGNOSTICS_COLLECT_MS` timeout, default 80ms):
 ```
 {<owner><L>,<R>,<stby>,<state>,<resets>}
 {stats:rx=<rx>,jd=<jd>,pe=<pe>,bc=<bc>,tx=<tx>,ms=<ms>}
@@ -121,6 +128,8 @@ Returns multiple lines:
 | stby | 0/1 | Motor driver standby |
 | state | 0-4 | Motion controller state |
 | resets | 0+ | Reset counter |
+
+**Note**: The bridge collects all diagnostic lines sent by the firmware within the `DIAGNOSTICS_COLLECT_MS` window and returns them as a single `diagnostics` array in the `robot.reply` message.
 
 ### Boot Marker
 
@@ -302,43 +311,48 @@ If the firmware resets at any time, the bridge detects the boot marker and broad
 
 ## Streaming Semantics
 
-- **Rate limit**: Max 20Hz, default 10Hz
-- **TTL**: Clamped to 150-300ms, default 200ms
+- **Rate limit**: Max 20Hz, default 10Hz (configurable via `STREAM_MAX_RATE_HZ`)
+- **TTL**: Clamped to 150-300ms (configurable via `STREAM_MIN_TTL_MS`/`STREAM_MAX_TTL_MS`), default 200ms
 - **Coalescing**: Only latest setpoint sent if queue builds up
 - **Stop priority**: N=201 always preempts queue
 - **Fire-and-forget**: N=200 never expects response
+- **Global rate limit**: 50 commands/second (configurable via `MAX_COMMANDS_PER_SEC`)
 
 ## Priority Queue
 
 | Priority | Commands | Behavior |
 |----------|----------|----------|
 | 0 (highest) | N=201 Stop | Never dropped, preempts queue |
-| 1 | N=120 Diagnostics | Normal queue |
+| 1 | N=120 Diagnostics | Normal queue, collects multi-line response (timeout: `DIAGNOSTICS_COLLECT_MS`) |
 | 2 | N=999 Direct Motor | Normal queue |
 | 3 | Other commands | Normal queue |
 | 4 (lowest) | N=200 Setpoints | Coalesced (keep latest only) |
 
-Global rate limit: 50 commands/second
+**Global rate limit**: 50 commands/second (configurable via `MAX_COMMANDS_PER_SEC`)
+
+The rate limiter uses a token bucket algorithm that refills tokens at the configured rate. Commands that would exceed the rate limit are queued until tokens are available.
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SERIAL_PORT` | auto-detect | Serial port path |
-| `SERIAL_BAUD` | 115200 | Baud rate |
-| `WS_PORT` | 8765 | WebSocket server port |
-| `HTTP_PORT` | 8766 | HTTP server port |
-| `LOOPBACK_MODE` | false | Enable loopback testing mode |
-| `DEBUG` | false | Enable verbose logging |
-| `STREAM_DEFAULT_RATE_HZ` | 10 | Default streaming rate |
-| `STREAM_MAX_RATE_HZ` | 20 | Maximum streaming rate |
-| `STREAM_DEFAULT_TTL_MS` | 200 | Default setpoint TTL |
-| `STREAM_MIN_TTL_MS` | 150 | Minimum TTL (clamped) |
-| `STREAM_MAX_TTL_MS` | 300 | Maximum TTL (clamped) |
-| `HANDSHAKE_TIMEOUT_MS` | 1500 | Boot marker timeout |
-| `COMMAND_TIMEOUT_MS` | 250 | Command response timeout |
-| `DTR_SETTLE_MS` | 700 | DTR settle delay on open |
-| `LOG_PATH` | ./data/bridge.log | NDJSON log file path |
+| Variable | Default | Range | Description |
+|----------|---------|-------|-------------|
+| `SERIAL_PORT` | auto-detect | - | Serial port path (optional, auto-detects if not set) |
+| `SERIAL_BAUD` | 115200 | positive int | Baud rate |
+| `WS_PORT` | 8765 | 1-65535 | WebSocket server port |
+| `HTTP_PORT` | 8766 | 1-65535 | HTTP server port |
+| `LOOPBACK_MODE` | false | true/false | Enable loopback testing mode (no hardware) |
+| `DEBUG` | false | true/false | Enable verbose logging |
+| `STREAM_DEFAULT_RATE_HZ` | 10 | 1-20 | Default streaming rate |
+| `STREAM_MAX_RATE_HZ` | 20 | 1-20 | Maximum streaming rate |
+| `STREAM_DEFAULT_TTL_MS` | 200 | 100-500 | Default setpoint TTL |
+| `STREAM_MIN_TTL_MS` | 150 | 100-300 | Minimum TTL (clamped) |
+| `STREAM_MAX_TTL_MS` | 300 | 200-500 | Maximum TTL (clamped) |
+| `MAX_COMMANDS_PER_SEC` | 50 | 1-100 | Global rate limit for command queue |
+| `HANDSHAKE_TIMEOUT_MS` | 1500 | 500-5000 | Boot marker timeout |
+| `COMMAND_TIMEOUT_MS` | 250 | 100-5000 | Command response timeout |
+| `DIAGNOSTICS_COLLECT_MS` | 80 | 30-200 | Time to collect multi-line diagnostics (N=120) |
+| `DTR_SETTLE_MS` | 700 | 300-2000 | DTR settle delay on serial port open |
+| `LOG_PATH` | ./data/bridge.log | - | NDJSON log file path |
 
 ## Logging
 

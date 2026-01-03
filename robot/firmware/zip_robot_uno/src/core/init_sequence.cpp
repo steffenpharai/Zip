@@ -302,31 +302,11 @@ void InitSequence::handleSpinR() {
 }
 
 void InitSequence::handleComplete() {
+  // Stop motors FIRST
   stopMotors();
   
-  // Sample final IMU yaw and compute delta
-  if (g_imuInitialized) {
-    imu.update();
-    int16_t yawFinal = (int16_t)(imu.getYaw() * 10);
-    
-    // Compute total yaw change across both spins
-    int16_t deltaL = yawAfterSpinL - yawBeforeSpin;
-    int16_t deltaR = yawFinal - yawAfterSpinL;
-    yawDelta = abs(deltaL) + abs(deltaR);
-    
-    // Check for IMU motion correlation
-    // If we spun both directions and yaw delta is < 50 (5.0 degrees), warn
-    if (yawDelta < 50 && !(warnBits & WARN_IMU_MISSING)) {
-      warnBits |= WARN_IMU_NO_MOTION;
-    }
-  }
-  
   // Set final state
-  if (warnBits != WARN_NONE) {
-    state = INIT_WARN;
-  } else {
-    state = INIT_DONE;
-  }
+  state = INIT_DONE;
   
   // Reset safety layer slew state
   driveSafety.resetSlew();

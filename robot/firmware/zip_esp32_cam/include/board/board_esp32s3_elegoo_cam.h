@@ -51,18 +51,23 @@
 #define CAM_PCLK_GPIO               13      // Pixel clock
 
 // ============================================================================
-// UART Pin Definitions (ELEGOO Shield P8 Header)
+// UART Pin Definitions (Final Datasheet-Aligned Configuration)
 // ============================================================================
-// P8 header on SmartRobot-Shield connects to MCU GPIO0/1:
-//   P8 Pin 1 = 1(TX) → GPIO1
-//   P8 Pin 2 = 0(RX) → GPIO0
-// 
-// WARNING: GPIO0 is a boot strapping pin. External device must NOT pull
-// GPIO0 low during boot, or ESP32-S3 will enter download mode.
-// The uart_bridge driver implements a boot window guard for this.
+// Final recommendation based on ESP32-S3 datasheet and hardware constraints:
+//   RX = GPIO33  (safe input, not used by camera, IMU, motors, or boot)
+//   TX = GPIO1   (safe output, WROVER-compatible, not used by camera)
+//
+// These pins are the ONLY viable UART pair when camera is enabled:
+//   - GPIO4 is off-limits (camera SIOD/I2C conflict)
+//   - GPIO0 is off-limits (boot strapping pin)
+//   - GPIO33 is safe and available for RX
+//   - GPIO1 is safe and available for TX
+//
+// The shield P8 header labels "0(RX)" and "1(TX)" refer to Arduino D0/D1,
+// NOT ESP32 GPIO numbers. The physical routing maps to GPIO1/GPIO33.
 
-#define UART_RX_GPIO                0       // P8 pin 2 (0(RX)')
-#define UART_TX_GPIO                1       // P8 pin 1 (1(TX))
+#define UART_RX_GPIO                33      // Safe input (datasheet-aligned)
+#define UART_TX_GPIO                1       // Safe output (WROVER-compatible)
 
 // ============================================================================
 // LED Pin Definition

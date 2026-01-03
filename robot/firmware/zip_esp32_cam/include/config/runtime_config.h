@@ -138,9 +138,10 @@
 // Watchdog Configuration
 // ============================================================================
 
-// Watchdog timeout during initialization (longer for camera init)
+// Watchdog timeout during initialization (longer for camera + WiFi init)
+// WiFi.mode() and WiFi.softAP() can take 2-5 seconds, so we need longer timeout
 #ifndef CONFIG_WDT_INIT_TIMEOUT_S
-#define CONFIG_WDT_INIT_TIMEOUT_S   30
+#define CONFIG_WDT_INIT_TIMEOUT_S   60  // Increased from 30 to 60 seconds
 #endif
 
 // Watchdog timeout during runtime

@@ -20,7 +20,8 @@ enum class NetStatus {
     DISCONNECTED,       // WiFi not started
     INITIALIZING,       // WiFi starting up
     AP_ACTIVE,          // Access Point is running
-    ERROR               // Initialization failed
+    ERROR,              // Initialization failed
+    TIMEOUT             // Initialization timed out
 };
 
 // ============================================================================
@@ -38,12 +39,29 @@ struct NetStats {
 // ============================================================================
 
 /**
- * Initialize WiFi Access Point.
- * Creates AP with ELEGOO MAC-based SSID.
+ * Initialize WiFi Access Point synchronously (blocking, like ELEGOO).
+ * This function performs all WiFi initialization in a blocking manner.
+ * Should be called from setup() after camera initialization completes.
  * 
- * @return true if initialization succeeded
+ * @return true if initialization succeeded, false otherwise
  */
-bool net_init();
+bool net_init_sync();
+
+/**
+ * Start WiFi Access Point initialization (non-blocking).
+ * Must be called from setup(). Initialization progresses via net_tick().
+ * 
+ * @return true if initialization started successfully
+ */
+bool net_start();
+
+/**
+ * Advance WiFi initialization state machine (non-blocking).
+ * Call this from loop() every iteration until net_is_ok() or net_status() == ERROR.
+ * 
+ * @return true if initialization is still in progress, false if done/failed
+ */
+bool net_tick();
 
 /**
  * Get current network status.
@@ -108,6 +126,12 @@ NetStats net_get_stats();
  * @return Error message or "OK"
  */
 const char* net_last_error();
+
+/**
+ * Mark that camera was stopped before WiFi init (for resume tracking).
+ * Call this after stopping the camera in setup() if you stop it there.
+ */
+void net_mark_camera_stopped();
 
 #endif // NET_SERVICE_H
 
