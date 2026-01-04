@@ -401,14 +401,18 @@ static void handleBridgeCommand(const String& json) {
     if (cmdN == 0) {
         // Respond with {tag_ok} format
         String response = "{" + tag + "_ok}";
-        Serial.println(response);
-        Serial.flush();
+        if (Serial.availableForWrite() >= response.length() + 10) {  // Check buffer space
+            Serial.println(response);
+            // REMOVED: Serial.flush() - Don't block if Serial not connected
+        }
         LOG_V("BRIDGE", "Hello command: tag=%s, response=%s", tag.c_str(), response.c_str());
     } else if (cmdN >= 0) {
         // Other commands - respond with ok for now
         String response = "{" + tag + "_ok}";
-        Serial.println(response);
-        Serial.flush();
+        if (Serial.availableForWrite() >= response.length() + 10) {  // Check buffer space
+            Serial.println(response);
+            // REMOVED: Serial.flush() - Don't block if Serial not connected
+        }
         LOG_V("BRIDGE", "Command N=%d, tag=%s, response=%s", cmdN, tag.c_str(), response.c_str());
     }
 }
@@ -466,11 +470,12 @@ void setup() {
     // This must be done before any Serial.printf() calls
     Serial.setRxBufferSize(1024);  // Large buffer for JSON commands
     Serial.begin(CONFIG_DEBUG_BAUD);
-    Serial.flush();  // Ensure Serial is ready
+    // REMOVED: Serial.flush() - Don't block if Serial not connected
+    // Serial will buffer output and drain when connected
     
     // Send early boot marker to "hook" the bridge (prevents timeout during long init)
     Serial.print("R\n");
-    Serial.flush();
+    // REMOVED: Serial.flush() - Don't block if Serial not connected
     
     Serial.printf("[DBG-SETUP] setup() started at %lu ms\n", setup_start);
     

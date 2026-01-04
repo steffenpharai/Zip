@@ -1101,3 +1101,51 @@ E (17177) task_wdt: Aborting.
 - **Reset timing**: ~15-17 seconds after servers start
 - **Reset type**: `rst:0xc (RTC_SW_CPU_RST)` - Software reset triggered by watchdog abort
 
+## Solution 22: Remove Blocking Serial.flush() Calls (January 2026)
+
+**Status**: ✅ **IMPLEMENTED AND VERIFIED**
+
+**Problem**: ESP32 would only run when USB was connected and Serial monitor was actively draining the buffer. When Serial was not connected or monitor was closed, the system would hang or reset.
+
+**Root Cause**: Blocking `Serial.flush()` calls would wait indefinitely for the Serial buffer to drain, which never happened when Serial wasn't connected. This blocked WiFi initialization and other critical operations.
+
+**Solution**: 
+1. **Removed all blocking `Serial.flush()` calls** from:
+   - `net_service.cpp`: Removed flush during WiFi initialization (line 512)
+   - `app_main.cpp`: Removed flush calls during setup (lines 469, 473)
+   - `app_main.cpp`: Removed flush calls in bridge command handler (lines 405, 411)
+
+2. **Made Serial operations non-blocking**:
+   - Added buffer space checks (`Serial.availableForWrite() >= 200`) before Serial operations
+   - Serial output is buffered and drains automatically when connected
+   - If Serial is not connected, operations are skipped gracefully
+
+3. **Replaced blocking Serial operations with ESP_LOG**:
+   - Critical messages use `ESP_LOG` macros (non-blocking, always works)
+   - Debug Serial.printf() calls replaced with ESP_LOG where appropriate
+
+**Implementation Details**:
+```cpp
+// Before (blocking):
+Serial.println("READY");
+Serial.flush();  // Blocks indefinitely if Serial not connected
+
+// After (non-blocking):
+if (Serial.availableForWrite() >= 200) {
+    Serial.println("READY");
+    // No flush - buffer drains automatically when connected
+}
+ESP_LOGI("NET", "WiFi AP ready: SSID=%s, IP=%s", ssid, ip);  // Always works
+```
+
+**Result**: ✅ **VERIFIED** - ESP32 now runs normally:
+- ✅ Works without USB connected (external power)
+- ✅ Works without Serial monitor open
+- ✅ WiFi initialization completes regardless of Serial connection
+- ✅ System continues operating even if Serial buffer fills up
+- ✅ Health endpoint confirms wireless operation: `{"wifi":{"mode":"AP","ip":"192.168.4.1","stations":1}}`
+
+**Files Modified**:
+- `src/net/net_service.cpp`: Removed blocking Serial.flush() during WiFi init
+- `src/app/app_main.cpp`: Removed blocking Serial.flush() in setup and bridge handler
+

@@ -241,6 +241,7 @@ The firmware continues running even if subsystems fail:
 - **Camera fails**: WiFi, UART, and web server still work. `/stream` returns 503.
 - **UART fails**: Camera and WiFi still work.
 - **WiFi fails**: Logs error but doesn't crash.
+- **Serial not connected**: System runs normally without USB/Serial monitor. Serial operations are non-blocking and buffer output.
 
 ## Troubleshooting
 
@@ -269,6 +270,20 @@ board_build.arduino.memory_type = qio_opi
 1. Ensure PC is close to robot (WiFi range ~10m)
 2. Check for interference from other 2.4GHz devices
 3. Robot must be powered on
+
+### ESP32 Not Running Without USB/Serial Monitor
+
+**Fixed in v2.0**: The firmware now runs independently of Serial connection status.
+
+**Previous Issue**: ESP32 would only run when USB was connected and Serial monitor was open, due to blocking `Serial.flush()` calls.
+
+**Solution**: 
+- Removed all blocking `Serial.flush()` calls
+- Serial operations are now non-blocking (buffer output, drain when connected)
+- Critical messages use ESP_LOG (always works, even without Serial)
+- Buffer space checks prevent blocking when Serial buffer is full
+
+**Result**: ESP32 now runs normally on external power without USB/Serial connection.
 
 ## Changes from Original ELEGOO Firmware
 

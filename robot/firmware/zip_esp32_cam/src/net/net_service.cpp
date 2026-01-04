@@ -295,14 +295,8 @@ bool net_start() {
 }
 
 bool net_tick() {
-    // #region agent log - Hypothesis C: Track net_tick() entry and state
-    static unsigned long s_last_tick_log = 0;
-    if (millis() - s_last_tick_log > 1000) {  // Log every second during tick
-        Serial.printf("[DBG-NET-TICK] net_tick() called: state=%d, status=%d, millis=%lu\n",
-                     (int)s_init_state, (int)s_status, millis());
-        s_last_tick_log = millis();
-    }
-    // #endregion
+    // Debug logging (non-blocking - use ESP_LOG instead of Serial)
+    // Removed Serial.printf() to prevent blocking when Serial not connected
     
     // Check for software timeout (robust boot timeout)
     if (s_init_state != WiFiInitState::IDLE && 
@@ -316,7 +310,8 @@ bool net_tick() {
             LOG_E("NET", "WiFi initialization timeout after %lu ms (limit: %lu ms)", 
                   elapsed, BOOT_WIFI_TIMEOUT_MS);
             LOG_W("NET", "Continuing boot WITHOUT WiFi (safe mode)");
-            Serial.println("[BOOT] WiFi init FAILED - continuing without WiFi");
+            // Use ESP_LOG instead of Serial (non-blocking)
+            ESP_LOGW("NET", "WiFi init FAILED - continuing without WiFi");
             return false;
         }
     }
@@ -476,48 +471,37 @@ bool net_tick() {
                 esp_err_t ret = esp_netif_get_ip_info(s_ap_netif, &ip_info);
                 
                 if (ret == ESP_OK) {
-                    // #region agent log - Hypothesis D: Track status change to AP_ACTIVE
-                    Serial.printf("[DBG-NET-TICK] Setting status to AP_ACTIVE at %lu ms\n", millis());
-                    // #endregion
+                    // Status change to AP_ACTIVE (use ESP_LOG for non-blocking logging)
+                    ESP_LOGD("NET", "Setting status to AP_ACTIVE at %lu ms", millis());
                     s_init_state = WiFiInitState::DONE;
                     s_status = NetStatus::AP_ACTIVE;
                     s_start_time = millis();
                     s_error_message = "OK";
                     
-                    // #region agent log - Hypothesis D: Verify status after setting
-                    Serial.printf("[DBG-NET-TICK] Status set: state=%d, status=%d, net_is_ok()=%d\n",
-                                 (int)s_init_state, (int)s_status, (s_status == NetStatus::AP_ACTIVE));
-                    // #endregion
+                    ESP_LOGD("NET", "Status set: state=%d, status=%d, net_is_ok()=%d",
+                             (int)s_init_state, (int)s_status, (s_status == NetStatus::AP_ACTIVE));
                     
                     char ip_str[16];
                     snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
                     LOG_I("NET", "AP IP: %s", ip_str);
                     LOG_I("NET", "WiFi Access Point ready");
                     
-                    // #region agent log - Hypothesis A: Track Serial.flush() timing
-                    unsigned long before_serial_flush = millis();
-                    Serial.printf("[DBG-NET] About to call Serial.flush() at %lu ms\n", before_serial_flush);
-                    // #endregion
-                    
-                    // Print connection instructions
-                    Serial.println(":----------------------------:");
-                    Serial.printf("wifi_name:%s\n", s_ssid.c_str());
-                    Serial.println(":----------------------------:");
-                    Serial.printf("WiFi Ready! Use 'http://%s' to connect\n", ip_str);
-                    
-                    // Send READY marker to bridge (signals WiFi is ready and ESP32 can handle commands)
-                    Serial.println("READY");
-                    
-                    // #region agent log - Hypothesis A: Measure Serial.flush() duration
-                    Serial.flush();
-                    unsigned long after_serial_flush = millis();
-                    unsigned long flush_duration = after_serial_flush - before_serial_flush;
-                    Serial.printf("[DBG-NET] Serial.flush() completed at %lu ms (duration=%lu ms)\n",
-                                 after_serial_flush, flush_duration);
-                    if (flush_duration > 100) {
-                        Serial.printf("[DBG-NET] WARNING: Serial.flush() took %lu ms (may be blocking)\n", flush_duration);
+                    // Print connection instructions (non-blocking - Serial buffers output)
+                    // REMOVED: Serial.flush() - This blocks when Serial is not connected
+                    // Serial operations are buffered and will drain automatically when connected
+                    // If Serial is not connected, we don't want to block here
+                    if (Serial.availableForWrite() >= 200) {  // Check buffer space before writing
+                        Serial.println(":----------------------------:");
+                        Serial.printf("wifi_name:%s\n", s_ssid.c_str());
+                        Serial.println(":----------------------------:");
+                        Serial.printf("WiFi Ready! Use 'http://%s' to connect\n", ip_str);
+                        
+                        // Send READY marker to bridge (signals WiFi is ready and ESP32 can handle commands)
+                        Serial.println("READY");
                     }
-                    // #endregion
+                    
+                    // Use ESP_LOG for critical messages (non-blocking, always works)
+                    ESP_LOGI("NET", "WiFi AP ready: SSID=%s, IP=%s", s_ssid.c_str(), ip_str);
                     
                     return false;  // Done
                 } else {
