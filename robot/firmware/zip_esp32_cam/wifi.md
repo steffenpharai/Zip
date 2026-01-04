@@ -1149,3 +1149,40 @@ ESP_LOGI("NET", "WiFi AP ready: SSID=%s, IP=%s", ssid, ip);  // Always works
 - `src/net/net_service.cpp`: Removed blocking Serial.flush() during WiFi init
 - `src/app/app_main.cpp`: Removed blocking Serial.flush() in setup and bridge handler
 
+---
+
+## Solution 23: Fix Health Endpoint Crash (v2.0)
+
+**Issue**: Accessing `/health` endpoint causes ESP32 to crash/restart.
+
+**Root Cause**: 
+- String lifetime issues: Calling `.c_str()` on temporary `String` objects returns pointers to internal buffers that become invalid when the temporary object is destroyed
+- Buffer overflow: JSON response exceeded 1KB buffer size with enhanced diagnostics
+- Stack overflow: Large buffer allocation on stack
+
+**Solution**:
+1. **Store String objects before use**: Store `String` objects in local variables before calling `snprintf()` to ensure they remain valid throughout the formatting operation
+2. **Increase buffer size**: Changed JSON buffer from 1KB to 3KB (static allocation)
+3. **Buffer overflow protection**: Added check for `snprintf` return value and fallback error response
+4. **Null pointer safety**: Added null checks for all string operations
+
+**Implementation** (`src/web/web_server.cpp`):
+```cpp
+// Store String objects before use
+String wifi_ssid = net_get_ssid();
+String wifi_ip = net_get_ip().toString();
+// Now use .c_str() on these stored objects
+snprintf(json, sizeof(json), ..., wifi_ssid.c_str(), wifi_ip.c_str(), ...);
+```
+
+**Result**: ✅ **VERIFIED** - Health endpoint now works without crashes:
+- ✅ Provides comprehensive diagnostics for all subsystems
+- ✅ No crashes or restarts when accessing `/health`
+- ✅ Enhanced diagnostics include error codes, timestamps, and detailed status
+- ✅ Python diagnostic script available (`scripts/query_health.py`)
+
+**Files Modified**:
+- `src/web/web_server.cpp`: Fixed String lifetime, increased buffer, added overflow protection
+- `scripts/query_health.py`: New diagnostic script for health endpoint
+- `README.md`: Updated documentation with enhanced health endpoint details
+
