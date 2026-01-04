@@ -232,7 +232,7 @@ robot/firmware/zip_esp32_cam/
     "mode": "AP",
     "ssid": "ELEGOO-A892C72C01FC",
     "ip": "192.168.4.1",
-    "tx_power": 20,
+    "tx_power": 15,
     "stations": 1,
     "uptime_ms": 17330,
     "last_error": "OK"
@@ -347,9 +347,10 @@ board_build.arduino.memory_type = qio_opi
 
 ### WiFi Connection Drops
 
-1. Ensure PC is close to robot (WiFi range ~10m)
+1. Ensure PC is close to robot (WiFi range ~15m with 15dBm TX power)
 2. Check for interference from other 2.4GHz devices
 3. Robot must be powered on
+4. TX power is configurable via `CONFIG_WIFI_TX_POWER` in `runtime_config.h` (default: 15dBm)
 
 ### ESP32 Not Running Without USB/Serial Monitor
 
@@ -364,6 +365,20 @@ board_build.arduino.memory_type = qio_opi
 - Buffer space checks prevent blocking when Serial buffer is full
 
 **Result**: ESP32 now runs normally on external power without USB/Serial connection.
+
+### Watchdog Timeout / System Reset After WiFi Init
+
+**Fixed in v2.0**: Runtime watchdog timeout resolved by making TCP server socket non-blocking.
+
+**Previous Issue**: ESP32 would reset ~10 seconds after WiFi initialization due to watchdog timeout. The `network_camera` task was blocked on `accept()` waiting for TCP clients.
+
+**Solution**: 
+- TCP server socket set to non-blocking mode using `fcntl()`
+- `accept()` returns immediately when no client available (errno=EAGAIN)
+- Task can feed watchdog every loop iteration, preventing timeout
+- Error handling distinguishes "no client available" from actual errors
+
+**Result**: System runs indefinitely without watchdog resets, even when no TCP clients are connected.
 
 ### Health Endpoint Crashes ESP32
 

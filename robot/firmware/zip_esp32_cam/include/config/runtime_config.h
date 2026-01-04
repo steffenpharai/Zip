@@ -94,10 +94,10 @@
 #endif
 
 // WiFi TX power (in 0.25dBm units, e.g., 40 = 10dBm)
-// Reduced to 10dBm to prevent power supply brownout during WiFi init
+// Set to 15dBm (60) for testing - 50% increase from 10dBm
 // ESP-IDF uses 0.25dBm units, not Arduino WiFi enum
 #ifndef CONFIG_WIFI_TX_POWER
-#define CONFIG_WIFI_TX_POWER        40  // 10dBm in 0.25dBm units (reduced from 78/19.5dBm)
+#define CONFIG_WIFI_TX_POWER        60  // 15dBm in 0.25dBm units (testing - increased from 40/10dBm)
 #endif
 
 // SSID prefix (MAC address is appended)

@@ -66,12 +66,8 @@ static void wifi_init_task(void* parameter) {
     // Add yields between blocking calls to allow interrupts to be serviced
     LOG_I("NET", "WiFi init task started");
     
-    // CRITICAL: Set TX power to LOW (10dBm) BEFORE WiFi init to reduce current spike
-    // This prevents USB power brownout that triggers watchdog resets
-    // Must be called before esp_wifi_init() to take effect
-    LOG_I("NET", "Setting low TX power (10dBm) to prevent power brownout...");
-    // Note: esp_wifi_set_max_tx_power() requires WiFi to be initialized first,
-    // so we'll set it after esp_wifi_init() but before esp_wifi_start()
+    // Note: TX power will be set after esp_wifi_start() in the START_AP state
+    // esp_wifi_set_max_tx_power() requires WiFi to be started first
     
     // Yield to allow other tasks and interrupts to run
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -147,20 +143,8 @@ static void wifi_init_task(void* parameter) {
     // Yield after WiFi init
     vTaskDelay(pdMS_TO_TICKS(10));
     
-    // CRITICAL: Set low TX power BEFORE setting mode to reduce current spike
-    // This prevents USB power brownout during radio calibration
-    // Must be called after esp_wifi_init() but before esp_wifi_set_mode()
-    LOG_I("NET", "Setting low TX power (10dBm) to prevent power brownout...");
-    ret = esp_wifi_set_max_tx_power(CONFIG_WIFI_TX_POWER);  // 40 = 10dBm
-    if (ret != ESP_OK) {
-        LOG_W("NET", "Failed to set TX power: %s (continuing anyway)", esp_err_to_name(ret));
-    } else {
-        LOG_I("NET", "TX power set to 10dBm (reduced from 19.5dBm)");
-    }
-    s_tx_power_dbm = CONFIG_WIFI_TX_POWER / 4;  // Cache for status reporting
-    
-    // Yield after setting TX power
-    vTaskDelay(pdMS_TO_TICKS(10));
+    // Note: TX power will be set after esp_wifi_start() in the START_AP state
+    // esp_wifi_set_max_tx_power() requires WiFi to be started first
     
     // Set WiFi mode to AP BEFORE registering event handler
     // This ensures WiFi is in the correct state for event registration
@@ -427,10 +411,6 @@ bool net_tick() {
                 return false;
             }
             
-            // TX power already set in WiFi init task (before esp_wifi_start())
-            // Just cache the value for status reporting
-            s_tx_power_dbm = CONFIG_WIFI_TX_POWER / 4;  // Convert 0.25dBm units to dBm
-            
             // Start WiFi (non-blocking)
             unsigned long before_start = millis();
             ret = esp_wifi_start();
@@ -444,6 +424,17 @@ bool net_tick() {
             
             unsigned long after_start = millis();
             LOG_I("NET", "WiFi AP started (took %lu ms)", after_start - before_start);
+            
+            // CRITICAL: Set TX power AFTER esp_wifi_start() (WiFi must be started first)
+            // This is the correct timing - esp_wifi_set_max_tx_power() requires WiFi to be started
+            LOG_I("NET", "Setting TX power to %ddBm...", CONFIG_WIFI_TX_POWER / 4);
+            ret = esp_wifi_set_max_tx_power(CONFIG_WIFI_TX_POWER);  // 60 = 15dBm
+            if (ret != ESP_OK) {
+                LOG_W("NET", "Failed to set TX power: %s (continuing anyway)", esp_err_to_name(ret));
+            } else {
+                LOG_I("NET", "TX power set to %ddBm", CONFIG_WIFI_TX_POWER / 4);
+            }
+            s_tx_power_dbm = CONFIG_WIFI_TX_POWER / 4;  // Cache for status reporting
             
             s_init_state = WiFiInitState::WAIT_STABLE;
             s_stable_wait_start = millis();

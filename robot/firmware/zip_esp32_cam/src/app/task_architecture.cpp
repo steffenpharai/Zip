@@ -157,7 +157,13 @@ void task_network_camera(void* pvParameters) {
                 
                 if (bind(s_tcp_server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) >= 0) {
                     listen(s_tcp_server_fd, 1);
-                    ESP_LOGI(TAG, "TCP server listening on port %d", CONFIG_TCP_PORT);
+                    
+                    // CRITICAL: Set server socket to non-blocking to prevent accept() from blocking
+                    // This prevents watchdog timeout when no client is connecting
+                    int flags = fcntl(s_tcp_server_fd, F_GETFL, 0);
+                    fcntl(s_tcp_server_fd, F_SETFL, flags | O_NONBLOCK);
+                    
+                    ESP_LOGI(TAG, "TCP server listening on port %d (non-blocking)", CONFIG_TCP_PORT);
                 }
             }
             
@@ -166,18 +172,22 @@ void task_network_camera(void* pvParameters) {
         
         // Handle TCP client (non-blocking)
         if (s_servers_started && net_is_ok() && s_tcp_server_fd >= 0) {
-            // Accept new client
+            // Accept new client (non-blocking - server socket is already non-blocking)
             if (s_tcp_client_fd < 0) {
                 struct sockaddr_in client_addr;
                 socklen_t client_len = sizeof(client_addr);
                 s_tcp_client_fd = accept(s_tcp_server_fd, (struct sockaddr*)&client_addr, &client_len);
                 if (s_tcp_client_fd >= 0) {
-                    // Make non-blocking
+                    // Make client socket non-blocking
                     int flags = fcntl(s_tcp_client_fd, F_GETFL, 0);
                     fcntl(s_tcp_client_fd, F_SETFL, flags | O_NONBLOCK);
                     s_client_connected = true;
                     ESP_LOGI(TAG, "TCP client connected");
+                } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    // Error other than "no client available" - log it
+                    ESP_LOGW(TAG, "accept() failed: %s", strerror(errno));
                 }
+                // If errno == EAGAIN/EWOULDBLOCK, no client available - this is normal, continue
             }
             
             // Process TCP data (bounded)

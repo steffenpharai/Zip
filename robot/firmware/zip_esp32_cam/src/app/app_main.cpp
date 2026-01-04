@@ -161,7 +161,7 @@ static bool heartbeatReceived = false;
 static bool wasConnected = false;
 
 static void handleTcpClientNonBlocking() {
-    // Accept new client if none connected
+    // Accept new client if none connected (non-blocking - server socket is already non-blocking)
     if (s_tcp_client_fd < 0) {
         if (s_tcp_server_fd >= 0) {
             struct sockaddr_in client_addr;
@@ -182,6 +182,7 @@ static void handleTcpClientNonBlocking() {
                 heartbeatMissed = 0;
                 heartbeatReceived = false;
             }
+            // If accept() returns -1 with errno=EAGAIN/EWOULDBLOCK, no client available - this is normal
         }
         
         if (s_tcp_client_fd < 0) {
