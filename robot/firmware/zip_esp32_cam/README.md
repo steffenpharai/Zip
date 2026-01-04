@@ -38,13 +38,13 @@ Production-ready ESP32-S3 camera firmware for the ELEGOO Smart Robot Car V4.0, r
 **UART Bridge (to Robot Shield P8):**
 | Pin | GPIO | Note |
 |-----|------|------|
-| RX | 0 | Boot strapping pin - protected by boot guard |
-| TX | 1 | |
+| RX | 44 | Hardware UART0 RX |
+| TX | 43 | Hardware UART0 TX |
 
 **Status LED:**
 | Pin | GPIO |
 |-----|------|
-| LED | 14 |
+| LED | 3 |
 
 ## Requirements
 
@@ -148,7 +148,7 @@ robot/firmware/zip_esp32_cam/
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐    ┌─────────────────────────────────┐ │
 │  │  WiFi AP        │    │  Camera Server                  │ │
-│  │  ELEGOO-XXXX    │    │  - OV2640 sensor                │ │
+│  │  ELEGOO-XXXX    │    │  - OV2640 sensor (GPIO 15 XCLK)│ │
 │  │  192.168.4.1    │    │  - MJPEG encoder                │ │
 │  └────────┬────────┘    │  - HTTP handlers                │ │
 │           │             └─────────────────────────────────┘ │
@@ -275,10 +275,13 @@ board_build.arduino.memory_type = qio_opi
 | Item | Original | Refactored |
 |------|----------|------------|
 | Architecture | Monolithic main.cpp | Modular services |
-| Pin definitions | WROVER (invalid for S3) | Correct ESP32-S3 GPIOs |
-| UART pins | GPIO33/4 | GPIO0/1 (P8 header) |
-| LED pin | GPIO13 | GPIO14 (avoid PCLK conflict) |
-| Boot safety | None | GPIO0 boot guard |
+| Pin definitions | WROVER (invalid for S3) | OV2640 ESP32-S3 GPIOs |
+| Camera sensor | OV2640 (assumed) | OV2640 (verified) |
+| XCLK pin | GPIO 45 (strapping) | GPIO 15 (safe) |
+| I2C pins | GPIO 1/2 | GPIO 4/5 (OV2640 standard) |
+| UART pins | GPIO0/1 (boot issues) | GPIO43/44 (hardware UART0) |
+| LED pin | GPIO13/14 | GPIO3 (after boot) |
+| Boot safety | None | Strapping pin protection |
 | Diagnostics | Minimal | /health JSON endpoint |
 | Build system | Arduino IDE | PlatformIO |
 | Error handling | Basic | Structured with status tracking |

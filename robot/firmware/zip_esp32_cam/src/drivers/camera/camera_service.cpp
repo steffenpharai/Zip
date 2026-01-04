@@ -25,6 +25,13 @@ static esp_err_t s_last_error = ESP_OK;
 static const char* s_error_message = "Not initialized";
 static CameraStats s_stats = {0, 0, 0, 0, 0};
 
+// Static storage for camera config to enable resume after stop
+static camera_config_t s_saved_config = {};
+static bool s_config_saved = false;
+static framesize_t s_saved_framesize = FRAMESIZE_VGA;
+static int s_saved_vflip = 0;
+static int s_saved_hmirror = 0;
+
 
 // ============================================================================
 // Error Code to String Mapping
@@ -73,6 +80,10 @@ bool camera_init() {
           CAM_Y2_GPIO, CAM_Y3_GPIO, CAM_Y4_GPIO, CAM_Y5_GPIO,
           CAM_Y6_GPIO, CAM_Y7_GPIO, CAM_Y8_GPIO, CAM_Y9_GPIO);
     LOG_I("CAM", "VSYNC=%d HREF=%d", CAM_VSYNC_GPIO, CAM_HREF_GPIO);
+    
+    // NOTE: GPIO 0 is a boot strapping pin - do NOT manipulate it during init
+    // If your shield uses GPIO 0 for camera PWDN, configure CAM_PWDN_GPIO explicitly
+    // and handle it carefully after boot is complete
     
     // Build camera configuration
     camera_config_t config;
@@ -138,12 +149,11 @@ bool camera_init() {
     Serial.printf("[DBG-CAM] PSRAM before init: %lu bytes free\n", psram_before);
     // #endregion
     
-    // CRITICAL: Add 100ms delay before esp_camera_init() for GPIO 45 strapping pin safety
-    // GPIO 45 (XCLK) is a strapping pin that controls internal voltage for SPI flash (VDD_SPI)
-    // during boot. If XCLK toggles during boot, it can cause "MD5 Mismatch" or boot loop.
-    // This delay allows strapping pins to latch their initial values and boot process to complete.
-    LOG_I("CAM", "Waiting 100ms for GPIO 45 strapping pin to settle...");
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Small delay before camera init for hardware stabilization
+    // OV2640 uses GPIO 15 for XCLK (not a strapping pin), but delay is still good practice
+    // Allows power supply and I2C bus to stabilize
+    LOG_I("CAM", "Waiting 50ms for hardware stabilization...");
+    vTaskDelay(pdMS_TO_TICKS(50));
     
     // No watchdog manipulation - let system defaults handle it
     // Attempt initialization with timeout guard
@@ -331,13 +341,6 @@ sensor_t* camera_get_sensor() {
 // ============================================================================
 // Camera State Management (Production Pattern: Stop-Init-Resume)
 // ============================================================================
-
-// Static storage for camera config to enable resume after stop
-static camera_config_t s_saved_config = {};
-static bool s_config_saved = false;
-static framesize_t s_saved_framesize = FRAMESIZE_VGA;
-static int s_saved_vflip = 0;
-static int s_saved_hmirror = 0;
 
 bool camera_is_running() {
     return s_status == CameraStatus::OK;

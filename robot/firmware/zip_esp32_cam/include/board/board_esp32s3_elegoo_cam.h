@@ -2,10 +2,10 @@
  * Board Configuration - ESP32S3-Camera-v1.0 (ELEGOO Smart Robot Car V4.0)
  * 
  * Single source of truth for all pin assignments and board capabilities.
- * This header defines the correct ESP32-S3 GPIO mappings for the OV3660 camera
+ * This header defines the correct ESP32-S3 GPIO mappings for the OV2640 camera
  * and UART bridge to the robot shield.
  * 
- * Hardware: ESP32-S3-WROOM-1 + OV3660 camera module
+ * Hardware: ESP32-S3-WROOM-1 + OV2640 camera module
  * Shield: ELEGOO SmartRobot-Shield (TB6612)
  */
 
@@ -21,31 +21,32 @@
 #define BOARD_NAME                  "ESP32S3-Camera-v1.0"
 #define BOARD_VENDOR                "ELEGOO"
 #define BOARD_MCU                   "ESP32-S3-WROOM-1"
-#define BOARD_CAMERA_SENSOR         "OV3660"
+#define BOARD_CAMERA_SENSOR         "OV2640"
 
 // ============================================================================
-// Camera Pin Definitions (ESP32-S3 Valid GPIOs)
+// Camera Pin Definitions (ESP32-S3 Valid GPIOs) - OV2640 Configuration
 // ============================================================================
-// These pins are the correct ESP32-S3 mapping for the ELEGOO OV3660 camera module.
+// These pins are the correct ESP32-S3 mapping for the ELEGOO OV2640 camera module.
+// OV2640 uses different pins than OV3660 - this is the standard S3 shield mapping.
 // Unlike ESP32-WROVER, ESP32-S3 does not have GPIO 34, 35, 36, 39.
 // 
-// NOTE: GPIO 45 (XCLK) is a strapping pin - requires 100ms delay before camera init.
+// NOTE: GPIO 0 may be used for PWDN on some shields - check hardware.
 
-#define CAM_PWDN_GPIO               (-1)    // Power down not connected
+#define CAM_PWDN_GPIO               (-1)    // Power down not connected (or GPIO 0 if used)
 #define CAM_RESET_GPIO              (-1)    // Reset not connected
-#define CAM_XCLK_GPIO               45      // External clock (strapping pin - must delay before init)
-#define CAM_SIOD_GPIO               1       // I2C SDA (SCCB data) - was GPIO 4
-#define CAM_SIOC_GPIO               2       // I2C SCL (SCCB clock) - was GPIO 5
+#define CAM_XCLK_GPIO               15      // External clock (OV2640 standard - NOT GPIO 45)
+#define CAM_SIOD_GPIO               4       // I2C SDA (SCCB data) - OV2640 standard
+#define CAM_SIOC_GPIO               5       // I2C SCL (SCCB clock) - OV2640 standard
 
-// Parallel data pins (D0-D7 mapped to Y2-Y9)
-#define CAM_Y2_GPIO                 47      // D0 (shared with Flash LED)
-#define CAM_Y3_GPIO                 18      // D1 - was GPIO 9
-#define CAM_Y4_GPIO                 17      // D2 - was GPIO 8
-#define CAM_Y5_GPIO                 16      // D3 - was GPIO 10
-#define CAM_Y6_GPIO                 15      // D4 - was GPIO 12
-#define CAM_Y7_GPIO                 14      // D5 - was GPIO 18
-#define CAM_Y8_GPIO                 48      // D6 - was GPIO 17 (resolves PCLK conflict)
-#define CAM_Y9_GPIO                 12      // D7 - was GPIO 16
+// Parallel data pins (D0-D7) - OV2640 8-bit bus mapping
+#define CAM_Y2_GPIO                 11      // D0
+#define CAM_Y3_GPIO                 9       // D1
+#define CAM_Y4_GPIO                 8       // D2
+#define CAM_Y5_GPIO                 10      // D3
+#define CAM_Y6_GPIO                 12      // D4
+#define CAM_Y7_GPIO                 18      // D5
+#define CAM_Y8_GPIO                 17      // D6
+#define CAM_Y9_GPIO                 16      // D7
 
 // Sync signals
 #define CAM_VSYNC_GPIO              6       // Vertical sync
@@ -53,15 +54,14 @@
 #define CAM_PCLK_GPIO               13      // Pixel clock
 
 // ============================================================================
-// UART Pin Definitions (OV3660 Configuration)
+// UART Pin Definitions (OV2640 Configuration)
 // ============================================================================
-// UART pins updated for OV3660 camera module:
+// UART pins for OV2640 camera module:
 //   RX = GPIO44  (hardware UART0, safe input)
 //   TX = GPIO43  (hardware UART0, safe output)
 //
-// Previous pins (GPIO33/GPIO1) are now used by camera:
-//   - GPIO1 is now camera SIOD (I2C SDA) - must not be used for UART
-//   - GPIO33 is available but GPIO44/43 are preferred for hardware UART0
+// OV2640 uses GPIO 4/5 for I2C (SIOD/SIOC), so GPIO1 is available but
+// GPIO43/44 are preferred for hardware UART0 compatibility.
 //
 // The shield P8 header labels "0(RX)" and "1(TX)" refer to Arduino D0/D1,
 // NOT ESP32 GPIO numbers. The physical routing maps to GPIO43/GPIO44.
@@ -72,18 +72,18 @@
 // ============================================================================
 // LED Pin Definition
 // ============================================================================
-// Status LED moved to GPIO3 for OV3660 configuration.
-// GPIO14 is now used by camera D5 data pin.
+// Status LED on GPIO3 for OV2640 configuration.
+// GPIO14 is available (not used by OV2640 camera).
 
-#define LED_STATUS_GPIO             3       // Status LED (was GPIO 14)
+#define LED_STATUS_GPIO             3       // Status LED
 
 // ============================================================================
 // Optional Camera LED / Flash LED
 // ============================================================================
 // Define if the board has a camera flash LED. Set to -1 if not present.
-// For OV3660, flash LED shares GPIO 47 with camera D0 data pin.
+// For OV2640, flash LED is typically on a separate pin if present.
 #ifdef BOARD_HAS_CAMERA_LED
-#define CAM_LED_GPIO                47      // Flash LED (shared with D0)
+#define CAM_LED_GPIO                4       // Flash LED (if present, check hardware)
 #else
 #define CAM_LED_GPIO                (-1)    // Not present
 #endif
@@ -126,11 +126,12 @@ static_assert(CAM_Y2_GPIO != CAM_Y7_GPIO, "Camera Y2 conflicts with Y7");
 static_assert(CAM_Y2_GPIO != CAM_Y8_GPIO, "Camera Y2 conflicts with Y8");
 static_assert(CAM_Y2_GPIO != CAM_Y9_GPIO, "Camera Y2 conflicts with Y9");
 
-// PRODUCTION FIX: Ensure PCLK (GPIO 13) does not conflict with D6 data line (GPIO 48)
+// PRODUCTION FIX: Ensure PCLK (GPIO 13) does not conflict with data lines
 // PCLK is a dedicated hardware signal and must never be shared with data lines
 // If these overlap, the CPU will trigger watchdog reset as it enters "Live-lock"
 // trying to process constant stream of false clock interrupts
-static_assert(CAM_PCLK_GPIO != CAM_Y8_GPIO, "PCLK (GPIO 13) must not conflict with D6 data line (GPIO 48)");
+// For OV2640: D6 is GPIO 17, which is safe (no conflict with PCLK GPIO 13)
+static_assert(CAM_PCLK_GPIO != CAM_Y8_GPIO, "PCLK (GPIO 13) must not conflict with D6 data line");
 
 // ============================================================================
 // Board Capabilities Structure
@@ -159,7 +160,7 @@ struct BoardConfig {
 // during initialization based on actual hardware detection.
 
 #define BOARD_DEFAULT_UART_BAUD     115200
-#define BOARD_DEFAULT_XCLK_HZ       20000000    // 20 MHz (stable for OV3660, can test 24 MHz)
+#define BOARD_DEFAULT_XCLK_HZ       10000000    // 10 MHz (reduced for EMI reduction, stable for OV2640)
 #define BOARD_DEFAULT_PSRAM_BYTES   8388608     // 8 MB (typical for S3)
 #define BOARD_DEFAULT_FLASH_BYTES   8388608     // 8 MB (typical for S3)
 

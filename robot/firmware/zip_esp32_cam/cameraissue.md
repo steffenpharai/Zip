@@ -1,8 +1,13 @@
 # ESP32S3-Camera-v1.0 Camera Issue - RESOLVED
 
-## Status: RESOLVED
+## Status: RESOLVED (January 2026)
 
-The ESP32-S3 camera firmware has been successfully refactored and is now working with correct GPIO pin mappings. The camera streams video, WiFi AP mode works, and UART bridge to the robot shield is operational.
+The ESP32-S3 camera firmware has been successfully refactored and is now working with correct OV2640 GPIO pin mappings. The camera streams video, WiFi AP mode works, and UART bridge to the robot shield is operational.
+
+**Key Fix:** Migrated from OV3660 pin configuration to OV2640 standard pinout:
+- XCLK: GPIO 45 → GPIO 15 (not a strapping pin)
+- SIOD/SIOC: GPIO 1/2 → GPIO 4/5 (standard OV2640 I2C)
+- Data pins: Updated to OV2640 8-bit bus mapping
 
 ## Problem Summary (Historical)
 
@@ -42,16 +47,16 @@ The firmware was refactored with correct ESP32-S3 GPIO assignments:
 | HREF | 7 | Horizontal reference |
 | PCLK | 13 | Pixel clock |
 
-**UART Pins (WROVER-Compatible):**
+**UART Pins (OV2640 Configuration):**
 | Pin | GPIO | Notes |
 |-----|------|-------|
-| RX | 3 | WROVER UART0 RX (fixed from GPIO0) |
-| TX | 1 | WROVER UART0 TX |
+| RX | 44 | Hardware UART0 RX (safe, not a strapping pin) |
+| TX | 43 | Hardware UART0 TX |
 
 **LED Pin:**
 | Pin | GPIO | Notes |
 |-----|------|-------|
-| Status LED | 14 | Moved from 13 to avoid PCLK conflict |
+| Status LED | 3 | GPIO 3 (strapping pin, but safe after boot) |
 
 ### Firmware Architecture
 
