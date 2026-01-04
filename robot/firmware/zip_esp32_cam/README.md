@@ -87,6 +87,11 @@ pio run -t upload --upload-port COM4
 pio device monitor
 ```
 
+**Note**: The firmware runs independently of Serial connection. You can:
+- Unplug USB and power via external supply
+- Close Serial monitor - system continues running
+- Access diagnostics via WiFi health endpoint
+
 Expected output:
 ```
 ==========================================
@@ -189,40 +194,115 @@ robot/firmware/zip_esp32_cam/
 
 ## Health Endpoint
 
-`GET /health` returns JSON:
+`GET /health` returns comprehensive JSON diagnostics for all subsystems:
 
 ```json
 {
   "camera": {
     "init_ok": true,
-    "last_error": "OK",
     "status": "OK",
+    "last_error": "OK",
+    "error_code": 0,
+    "error_code_name": "ESP_OK",
     "captures": 1234,
-    "failures": 0
+    "failures": 0,
+    "last_capture_ms": 1,
+    "last_frame_bytes": 8972,
+    "last_capture_time": 20124,
+    "idle_ms": 2103
   },
   "uart": {
-    "rx_pin": 0,
-    "tx_pin": 1,
+    "init_ok": true,
+    "rx_pin": 44,
+    "tx_pin": 43,
     "rx_bytes": 5678,
     "tx_bytes": 1234,
-    "framing_errors": 0
-  },
-  "psram": {
-    "bytes": 8388608,
-    "free": 8380000
-  },
-  "heap": {
-    "free": 280000,
-    "min_free": 250000
+    "rx_frames": 42,
+    "tx_frames": 10,
+    "framing_errors": 0,
+    "buffer_overflows": 0,
+    "last_rx_ts": 3589,
+    "last_tx_ts": 1234,
+    "idle_ms": 18638,
+    "rx_available": 0
   },
   "wifi": {
+    "status": "AP_ACTIVE",
+    "init_ok": true,
     "mode": "AP",
-    "ssid": "ELEGOO-1234ABCD",
+    "ssid": "ELEGOO-A892C72C01FC",
     "ip": "192.168.4.1",
-    "stations": 1
+    "tx_power": 20,
+    "stations": 1,
+    "uptime_ms": 17330,
+    "last_error": "OK"
+  },
+  "psram": {
+    "detected": true,
+    "bytes": 8385831,
+    "free": 8168671,
+    "used": 217160
+  },
+  "heap": {
+    "free": 222564,
+    "min_free": 214744,
+    "largest_free_block": 212980
+  },
+  "chip": {
+    "model": "ESP32-S3",
+    "revision": 0,
+    "cores": 2,
+    "freq_mhz": 240,
+    "flash_size_mb": 8
   }
 }
 ```
+
+### Diagnostic Fields
+
+**Camera Diagnostics:**
+- `error_code`: ESP-IDF error code (0 = ESP_OK)
+- `error_code_name`: Human-readable error name
+- `last_capture_ms`: Duration of last capture operation
+- `last_frame_bytes`: Size of last captured frame
+- `idle_ms`: Time since last capture
+
+**UART Diagnostics:**
+- `init_ok`: Whether UART is initialized
+- `buffer_overflows`: Count of buffer overflow events
+- `last_rx_ts` / `last_tx_ts`: Timestamps of last activity
+- `idle_ms`: Time since last UART activity
+- `rx_available`: Bytes currently in RX buffer
+
+**WiFi Diagnostics:**
+- `status`: Detailed status (DISCONNECTED, INITIALIZING, AP_ACTIVE, ERROR, TIMEOUT)
+- `uptime_ms`: Time since AP started
+- `last_error`: Last error message from network service
+
+**System Diagnostics:**
+- `psram.detected`: Whether PSRAM is detected
+- `psram.used`: Used PSRAM bytes
+- `heap.largest_free_block`: Largest allocatable block
+- `chip.flash_size_mb`: Flash size in MB
+
+### Query Health Endpoint (Python Script)
+
+A Python diagnostic script is available to query the health endpoint over WiFi:
+
+```bash
+cd robot/firmware/zip_esp32_cam
+python scripts/query_health.py [IP_ADDRESS]
+
+# Default IP is 192.168.4.1
+python scripts/query_health.py
+```
+
+The script provides:
+- Detailed camera diagnostics with error codes
+- UART communication status and troubleshooting
+- WiFi connection details
+- System resource usage
+- Automatic diagnosis and troubleshooting tips
 
 ## Boot-Safe UART
 
@@ -284,6 +364,21 @@ board_build.arduino.memory_type = qio_opi
 - Buffer space checks prevent blocking when Serial buffer is full
 
 **Result**: ESP32 now runs normally on external power without USB/Serial connection.
+
+### Health Endpoint Crashes ESP32
+
+**Fixed in v2.0**: Enhanced health endpoint with proper string handling and buffer management.
+
+**Previous Issue**: Accessing `/health` endpoint caused ESP32 to crash/restart.
+
+**Solution**:
+- Fixed String lifetime issues (store String objects before use)
+- Increased JSON buffer to 3KB to prevent overflow
+- Added buffer overflow protection with fallback error response
+- Made JSON buffer static to avoid stack overflow
+- Added null pointer safety checks for all string operations
+
+**Result**: Health endpoint now provides comprehensive diagnostics without crashes.
 
 ## Changes from Original ELEGOO Firmware
 

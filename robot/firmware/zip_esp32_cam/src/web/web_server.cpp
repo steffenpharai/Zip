@@ -10,6 +10,8 @@
 #include "esp_http_server.h"
 #include "esp_camera.h"
 #include "esp_task_wdt.h"
+#include "esp_err.h"
+#include <string.h>
 #include "config/build_config.h"
 #include "config/runtime_config.h"
 #include "drivers/camera/camera_service.h"
@@ -147,18 +149,85 @@ static esp_err_t health_handler(httpd_req_t *req) {
         default:                            cam_status_str = "UNKNOWN"; break;
     }
     
-    // Build JSON response
-    char json[1024];
+    // Get network status string
+    const char* net_status_str;
+    switch (net_status()) {
+        case NetStatus::DISCONNECTED: net_status_str = "DISCONNECTED"; break;
+        case NetStatus::INITIALIZING:  net_status_str = "INITIALIZING"; break;
+        case NetStatus::AP_ACTIVE:     net_status_str = "AP_ACTIVE"; break;
+        case NetStatus::ERROR:         net_status_str = "ERROR"; break;
+        case NetStatus::TIMEOUT:       net_status_str = "TIMEOUT"; break;
+        default:                       net_status_str = "UNKNOWN"; break;
+    }
+    
+    // Get ESP error code name for camera (with safe null handling)
+    int cam_error_code = camera_last_error_code();
+    static char cam_error_code_str_buf[32];  // Static buffer for error code string
+    const char* cam_error_code_str = "ESP_OK";
+    if (cam_error_code != 0) {
+        // Try to get error name - fallback to hex if not available
+        const char* err_name = esp_err_to_name((esp_err_t)cam_error_code);
+        if (err_name && strlen(err_name) > 0) {
+            // Copy to static buffer to ensure it's valid
+            strncpy(cam_error_code_str_buf, err_name, sizeof(cam_error_code_str_buf) - 1);
+            cam_error_code_str_buf[sizeof(cam_error_code_str_buf) - 1] = '\0';
+            cam_error_code_str = cam_error_code_str_buf;
+        } else {
+            // Fallback to hex
+            snprintf(cam_error_code_str_buf, sizeof(cam_error_code_str_buf), "0x%x", cam_error_code);
+            cam_error_code_str = cam_error_code_str_buf;
+        }
+    }
+    
+    // Calculate time since last UART activity
+    unsigned long uart_idle_ms = 0;
+    if (uart_stats.last_rx_ts > 0) {
+        unsigned long now = millis();
+        if (now >= uart_stats.last_rx_ts) {
+            uart_idle_ms = now - uart_stats.last_rx_ts;
+        }
+    }
+    
+    // Calculate time since last camera capture
+    unsigned long cam_idle_ms = 0;
+    if (cam_stats.last_capture_time > 0) {
+        unsigned long now = millis();
+        if (now >= cam_stats.last_capture_time) {
+            cam_idle_ms = now - cam_stats.last_capture_time;
+        }
+    }
+    
+    // CRITICAL: Store String objects in local variables to ensure they stay alive during snprintf
+    // String.c_str() returns pointer to internal buffer - must keep String object alive
+    String wifi_ssid = net_get_ssid();
+    String wifi_ip = net_get_ip().toString();
+    const char* wifi_ssid_cstr = wifi_ssid.c_str();
+    const char* wifi_ip_cstr = wifi_ip.c_str();
+    const char* cam_error_msg = camera_last_error();
+    const char* net_error_msg = net_last_error();
+    const char* chip_model = ESP.getChipModel();
+    
+    // Build JSON response with enhanced diagnostics
+    // Use larger buffer to prevent overflow - JSON can be ~2000+ bytes with all fields
+    // ESP32-S3 has limited stack, so use static buffer
+    static char json[3072];  // 3KB static buffer for detailed diagnostics
     int len = snprintf(json, sizeof(json),
         "{"
         "\"camera\":{"
             "\"init_ok\":%s,"
-            "\"last_error\":\"%s\","
             "\"status\":\"%s\","
+            "\"last_error\":\"%s\","
+            "\"error_code\":%d,"
+            "\"error_code_name\":\"%s\","
             "\"captures\":%lu,"
-            "\"failures\":%lu"
+            "\"failures\":%lu,"
+            "\"last_capture_ms\":%lu,"
+            "\"last_frame_bytes\":%lu,"
+            "\"last_capture_time\":%lu,"
+            "\"idle_ms\":%lu"
         "},"
         "\"uart\":{"
+            "\"init_ok\":%s,"
             "\"rx_pin\":%d,"
             "\"tx_pin\":%d,"
             "\"rx_bytes\":%lu,"
@@ -166,35 +235,56 @@ static esp_err_t health_handler(httpd_req_t *req) {
             "\"rx_frames\":%lu,"
             "\"tx_frames\":%lu,"
             "\"framing_errors\":%lu,"
-            "\"last_rx_ts\":%lu"
-        "},"
-        "\"psram\":{"
-            "\"bytes\":%lu,"
-            "\"free\":%lu"
-        "},"
-        "\"heap\":{"
-            "\"free\":%lu,"
-            "\"min_free\":%lu"
+            "\"buffer_overflows\":%lu,"
+            "\"last_rx_ts\":%lu,"
+            "\"last_tx_ts\":%lu,"
+            "\"idle_ms\":%lu,"
+            "\"rx_available\":%lu"
         "},"
         "\"wifi\":{"
+            "\"status\":\"%s\","
+            "\"init_ok\":%s,"
             "\"mode\":\"AP\","
             "\"ssid\":\"%s\","
             "\"ip\":\"%s\","
             "\"tx_power\":%d,"
-            "\"stations\":%d"
+            "\"stations\":%d,"
+            "\"uptime_ms\":%lu,"
+            "\"last_error\":\"%s\""
+        "},"
+        "\"psram\":{"
+            "\"detected\":%s,"
+            "\"bytes\":%lu,"
+            "\"free\":%lu,"
+            "\"used\":%lu"
+        "},"
+        "\"heap\":{"
+            "\"free\":%lu,"
+            "\"min_free\":%lu,"
+            "\"largest_free_block\":%lu"
         "},"
         "\"chip\":{"
             "\"model\":\"%s\","
             "\"revision\":%d,"
             "\"cores\":%d,"
-            "\"freq_mhz\":%lu"
+            "\"freq_mhz\":%lu,"
+            "\"flash_size_mb\":%lu"
         "}"
         "}",
+        // Camera - use safe string handling
         camera_is_ok() ? "true" : "false",
-        camera_last_error(),
-        cam_status_str,
+        cam_status_str ? cam_status_str : "UNKNOWN",
+        cam_error_msg ? cam_error_msg : "Unknown",
+        cam_error_code,
+        cam_error_code_str ? cam_error_code_str : "ESP_OK",
         (unsigned long)cam_stats.captures,
         (unsigned long)cam_stats.failures,
+        (unsigned long)cam_stats.last_capture_ms,
+        (unsigned long)cam_stats.last_frame_bytes,
+        (unsigned long)cam_stats.last_capture_time,
+        (unsigned long)cam_idle_ms,
+        // UART
+        uart_is_ok() ? "true" : "false",
         uart_get_rx_pin(),
         uart_get_tx_pin(),
         (unsigned long)uart_stats.rx_bytes,
@@ -202,20 +292,45 @@ static esp_err_t health_handler(httpd_req_t *req) {
         (unsigned long)uart_stats.rx_frames,
         (unsigned long)uart_stats.tx_frames,
         (unsigned long)uart_stats.framing_errors,
+        (unsigned long)uart_stats.buffer_overflows,
         (unsigned long)uart_stats.last_rx_ts,
-        (unsigned long)ESP.getPsramSize(),
-        (unsigned long)ESP.getFreePsram(),
-        (unsigned long)ESP.getFreeHeap(),
-        (unsigned long)ESP.getMinFreeHeap(),
-        net_get_ssid().c_str(),
-        net_get_ip().toString().c_str(),
+        (unsigned long)uart_stats.last_tx_ts,
+        (unsigned long)uart_idle_ms,
+        (unsigned long)uart_rx_available(),
+        // WiFi - use safe string handling (String objects stored above)
+        net_status_str ? net_status_str : "UNKNOWN",
+        net_is_ok() ? "true" : "false",
+        wifi_ssid_cstr ? wifi_ssid_cstr : "",
+        wifi_ip_cstr ? wifi_ip_cstr : "0.0.0.0",
         (int)net_stats.tx_power,
         (int)net_stats.connected_stations,
-        ESP.getChipModel(),
+        (unsigned long)net_stats.uptime_ms,
+        net_error_msg ? net_error_msg : "OK",
+        // PSRAM
+        psramFound() ? "true" : "false",
+        (unsigned long)ESP.getPsramSize(),
+        (unsigned long)ESP.getFreePsram(),
+        (unsigned long)(ESP.getPsramSize() - ESP.getFreePsram()),
+        // Heap
+        (unsigned long)ESP.getFreeHeap(),
+        (unsigned long)ESP.getMinFreeHeap(),
+        (unsigned long)ESP.getMaxAllocHeap(),
+        // Chip - use safe string handling (stored above)
+        chip_model ? chip_model : "Unknown",
         ESP.getChipRevision(),
         ESP.getChipCores(),
-        (unsigned long)ESP.getCpuFreqMHz()
+        (unsigned long)ESP.getCpuFreqMHz(),
+        (unsigned long)(ESP.getFlashChipSize() / (1024 * 1024))
     );
+    
+    // Check for buffer overflow
+    if (len < 0 || len >= (int)sizeof(json)) {
+        // Buffer overflow or error - send minimal response
+        const char* error_json = "{\"error\":\"Health endpoint buffer overflow\"}";
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+        return httpd_resp_send(req, error_json, strlen(error_json));
+    }
     
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
