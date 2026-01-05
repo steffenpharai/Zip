@@ -2,15 +2,17 @@
  * UART Bridge Service - Implementation
  * 
  * UART communication bridge to the robot shield (Arduino UNO).
- * Uses GPIO44 (RX) and GPIO43 (TX) as defined in board_esp32s3_elegoo_cam.h.
+ * Uses GPIO3 (RX) and GPIO40 (TX) as defined in board_esp32s3_elegoo_cam.h.
  * 
- * Pin assignments (ESP32-S3-WROOM-1 with OV3660):
- *   - RX: GPIO44 (Hardware UART0 RX for bridge to Arduino UNO)
- *   - TX: GPIO43 (Hardware UART0 TX for serial communication)
+ * Pin assignments (ESP32-S3-WROOM-1 with OV2640) - VERIFIED via hardware testing:
+ *   - TX: GPIO40 (routed via GPIO matrix to UART1) - sends to Arduino RX - VERIFIED
+ *   - RX: GPIO3 (routed via GPIO matrix to UART1) - receives from Arduino TX - VERIFIED
  * 
- * Note: Previous OV2640 configuration used GPIO33/GPIO1, but these are now
- * used by the OV3660 camera (GPIO1 is SIOD/I2C SDA). GPIO43/44 are hardware
- * UART0 pins and work correctly with the shield slide-switch in "cam" position.
+ * CRITICAL: Uses UART1 (Serial1) instead of UART0 to avoid USB-CDC conflicts.
+ * GPIO40/3 are routed via GPIO matrix to UART1 to prevent conflicts with the
+ * internal USB-CDC bridge logic on ESP32-S3.
+ * 
+ * This ensures reliable communication even when USB is connected or disconnected.
  */
 
 #include "uart_bridge.h"
@@ -93,16 +95,17 @@ bool uart_init() {
     // Small delay for GPIO and Arduino UNO to settle after power-on
     delay(50);
     
-    // Initialize Serial2 with OV3660 pinout (GPIO44/GPIO43)
-    // Note: Previous OV2640 configuration used GPIO33/GPIO1, but GPIO1 is now
-    // used by camera SIOD (I2C SDA). GPIO43/44 are hardware UART0 pins.
-    // Ensure shield slide-switch is in "cam" position to bridge GPIO43/44 to Arduino Uno.
-    Serial2.begin(CONFIG_UART_BAUD, SERIAL_8N1, UART_RX_GPIO, UART_TX_GPIO);
+    // Initialize Serial1 (UART1) to avoid UART0/USB-CDC internal logic conflicts
+    // GPIO3 (RX) and GPIO40 (TX) are routed via GPIO matrix to UART1
+    // This prevents conflicts with the ESP32-S3's internal USB-CDC bridge logic
+    // that can "lock" UART0 even when USB is not connected.
+    // Ensure shield slide-switch is in "cam" position to bridge GPIO3/40 to Arduino Uno.
+    Serial1.begin(CONFIG_UART_BAUD, SERIAL_8N1, UART_RX_GPIO, UART_TX_GPIO);
     
     s_initialized = true;
     s_boot_guard_expired = true;  // No boot guard needed for GPIO3
     
-    LOG_I("UART", "Serial2 initialized on RX=GPIO%d TX=GPIO%d", 
+    LOG_I("UART", "Serial1 (UART1) initialized on RX=GPIO%d TX=GPIO%d", 
           UART_RX_GPIO, UART_TX_GPIO);
     
 #if ENABLE_UART_LOOPBACK
@@ -117,7 +120,7 @@ bool uart_init() {
 // Boot Guard Management (Legacy - kept for API compatibility)
 // ============================================================================
 // Note: Boot guard was originally needed when using GPIO0 for RX.
-// With GPIO3, immediate initialization is safe. These functions are
+// With GPIO3 (verified RX pin), immediate initialization is safe. These functions are
 // retained for API compatibility but boot guard is always "expired".
 
 bool uart_boot_guard_expired() {
@@ -137,10 +140,10 @@ void uart_tick() {
         return;
     }
     
-    // #region agent log - Hypothesis C: Check if Serial2 has data available
-    int avail = Serial2.available();
+    // #region agent log - Check if Serial1 has data available
+    int avail = Serial1.available();
     if (avail > 0) {
-        Serial.printf("[DBG-RX] Serial2.available()=%d\n", avail);
+        Serial.printf("[DBG-RX] Serial1.available()=%d\n", avail);
     }
     // Periodic debug every 5 seconds
     if (millis() - s_last_debug_ms > 5000) {
@@ -155,8 +158,8 @@ void uart_tick() {
     // #endregion
     
     // Read available data into ring buffer
-    while (Serial2.available() && !ring_buffer_full()) {
-        int byte = Serial2.read();
+    while (Serial1.available() && !ring_buffer_full()) {
+        int byte = Serial1.read();
         if (byte >= 0) {
             ring_buffer_push((uint8_t)byte);
             s_stats.rx_bytes++;
@@ -182,7 +185,7 @@ void uart_tick() {
     while (uart_rx_available() > 0) {
         int byte = ring_buffer_pop();
         if (byte >= 0) {
-            Serial2.write((uint8_t)byte);
+            Serial1.write((uint8_t)byte);
             s_stats.tx_bytes++;
         }
     }
@@ -197,7 +200,7 @@ size_t uart_tx(const uint8_t* data, size_t len) {
         return 0;
     }
     
-    size_t written = Serial2.write(data, len);
+    size_t written = Serial1.write(data, len);
     s_stats.tx_bytes += written;
     s_stats.last_tx_ts = millis();
     
@@ -214,7 +217,7 @@ size_t uart_tx_string(const char* str) {
     
     // Add newline after JSON commands for Arduino compatibility
     if (len > 0 && str[len - 1] == '}') {
-        Serial2.write('\n');
+        Serial1.write('\n');
         written++;
         s_stats.tx_frames++;
     }
@@ -330,5 +333,17 @@ int uart_get_rx_pin() {
 
 int uart_get_tx_pin() {
     return UART_TX_GPIO;
+}
+
+uint32_t uart_get_baud_rate() {
+    return CONFIG_UART_BAUD;
+}
+
+size_t uart_get_rx_buffer_size() {
+    return CONFIG_UART_RX_BUFFER_SIZE;
+}
+
+size_t uart_get_tx_buffer_size() {
+    return CONFIG_UART_TX_BUFFER_SIZE;
 }
 

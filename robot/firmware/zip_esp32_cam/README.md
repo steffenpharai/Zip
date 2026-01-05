@@ -38,13 +38,13 @@ Production-ready ESP32-S3 camera firmware for the ELEGOO Smart Robot Car V4.0, r
 **UART Bridge (to Robot Shield P8):**
 | Pin | GPIO | Note |
 |-----|------|------|
-| RX | 44 | Hardware UART0 RX |
-| TX | 43 | Hardware UART0 TX |
+| RX | 3 | UART1 RX (via GPIO matrix) - VERIFIED |
+| TX | 40 | UART1 TX (via GPIO matrix) - VERIFIED |
 
 **Status LED:**
 | Pin | GPIO |
 |-----|------|
-| LED | 3 |
+| LED | 14 | Moved from GPIO3 to free it for UART RX |
 
 ## Requirements
 
@@ -103,7 +103,7 @@ Flash: 8 MB
 Heap: 280000 bytes free
 PSRAM: 8388608 bytes (8380000 free)
 Camera: XCLK=15 SIOD=4 SIOC=5 PCLK=13
-UART: RX=0 TX=1 @ 115200 baud
+UART: RX=3 TX=40 @ 115200 baud
 LED: GPIO14
 ==========================================
 [INIT] Initializing camera...
@@ -160,7 +160,7 @@ robot/firmware/zip_esp32_cam/
 │  ┌────────▼────────┐                                        │
 │  │  TCP Server     │    ┌─────────────────────────────────┐ │
 │  │  Port 100       │───►│  UART Bridge (115200 baud)      │ │
-│  │  JSON bridge    │◄───│  GPIO0 RX, GPIO1 TX             │ │
+│  │  JSON bridge    │◄───│  GPIO3 RX, GPIO40 TX            │ │
 │  └─────────────────┘    └────────────┬────────────────────┘ │
 └──────────────────────────────────────┼──────────────────────┘
                                        │
@@ -213,8 +213,8 @@ robot/firmware/zip_esp32_cam/
   },
   "uart": {
     "init_ok": true,
-    "rx_pin": 44,
-    "tx_pin": 43,
+    "rx_pin": 3,
+    "tx_pin": 40,
     "rx_bytes": 5678,
     "tx_bytes": 1234,
     "rx_frames": 42,
@@ -306,13 +306,15 @@ The script provides:
 
 ## Boot-Safe UART
 
-GPIO0 is a boot strapping pin on ESP32-S3. If held LOW during reset, the chip enters download mode. The UART bridge implements a boot guard:
+The UART bridge uses GPIO3 (RX) and GPIO40 (TX), which are routed via GPIO matrix to UART1. These pins are **not boot strapping pins**, so they can be safely initialized immediately without boot protection delays.
 
-1. **Boot window**: First 1000ms after reset, UART RX is disabled
-2. **GPIO0 check**: At boot, logs warning if GPIO0 is LOW
-3. **Delayed init**: Serial2.begin() only after boot window expires
+**Previous Implementation**: GPIO0 was used for RX, which required a boot guard window to prevent interference with download mode. With GPIO3, this protection is no longer needed.
 
-This prevents external devices on the UART from interfering with boot.
+**Current Implementation**:
+- UART1 initialized immediately on boot
+- GPIO3/40 routed via GPIO matrix (not hardware UART pins)
+- No boot delay required
+- Shield slide-switch must be in "CAM" position to bridge GPIO3/40 to Arduino Uno
 
 ## Graceful Degradation
 

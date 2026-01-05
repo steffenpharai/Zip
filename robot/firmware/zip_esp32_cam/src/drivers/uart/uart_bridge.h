@@ -2,16 +2,19 @@
  * UART Bridge Service - Interface
  * 
  * Provides UART communication with the robot shield (Arduino UNO).
- * Uses hardware UART0 pinout for OV3660 camera configuration.
+ * Uses UART1 (Serial1) with GPIO matrix routing to GPIO40/3.
  * 
  * Hardware: ELEGOO SmartRobot-Shield (designed for ESP32-WROVER)
- *   TX = GPIO43 (ESP32 → Arduino RX)
- *   RX = GPIO44 (Arduino TX → ESP32)
+ * Pin assignments (VERIFIED via hardware testing):
+ *   TX = GPIO40 (ESP32 → Arduino RX) - VERIFIED
+ *   RX = GPIO3 (Arduino TX → ESP32) - VERIFIED
+ * 
+ * CRITICAL: Uses UART1 instead of UART0 to avoid USB-CDC conflicts.
+ * GPIO40/3 are routed via GPIO matrix to UART1 to prevent conflicts with
+ * ESP32-S3's internal USB-CDC bridge.
  * 
  * Note: The shield P8 header labels "0(RX)" and "1(TX)" refer to
- * Arduino D0/D1, not ESP32 GPIO numbers. For OV3660 configuration,
- * the physical routing uses GPIO43 (TX) and GPIO44 (RX) via hardware UART0.
- * Ensure shield slide-switch is in "cam" position.
+ * Arduino D0/D1, not ESP32 GPIO numbers. Ensure shield slide-switch is in "cam" position.
  */
 
 #ifndef UART_BRIDGE_H
@@ -41,7 +44,8 @@ struct UartStats {
 
 /**
  * Initialize the UART bridge.
- * Configures Serial2 with OV3660-compatible pins (GPIO43/GPIO44).
+ * Configures Serial1 (UART1) with GPIO matrix routing to GPIO3/GPIO40.
+ * Uses UART1 to avoid UART0/USB-CDC conflicts on ESP32-S3.
  * 
  * @return true if initialization succeeded
  */
@@ -56,10 +60,10 @@ bool uart_is_ok();
 
 /**
  * Check if boot guard window has expired.
- * Legacy function - always returns true with GPIO44 (non-strapping pin).
+ * Legacy function - always returns true with GPIO3 (verified RX pin).
  * Retained for API compatibility.
  * 
- * @return true (always, since GPIO44 doesn't need boot protection)
+ * @return true (always, since GPIO3 doesn't need boot protection)
  */
 bool uart_boot_guard_expired();
 
@@ -136,6 +140,27 @@ int uart_get_rx_pin();
  * @return GPIO number for TX
  */
 int uart_get_tx_pin();
+
+/**
+ * Get the UART baud rate.
+ * 
+ * @return Baud rate in bits per second
+ */
+uint32_t uart_get_baud_rate();
+
+/**
+ * Get the RX buffer size.
+ * 
+ * @return RX buffer size in bytes
+ */
+size_t uart_get_rx_buffer_size();
+
+/**
+ * Get the TX buffer size.
+ * 
+ * @return TX buffer size in bytes
+ */
+size_t uart_get_tx_buffer_size();
 
 /**
  * Check if a complete JSON frame is available.

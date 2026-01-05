@@ -56,26 +56,30 @@
 // ============================================================================
 // UART Pin Definitions (OV2640 Configuration)
 // ============================================================================
-// UART pins for OV2640 camera module:
-//   RX = GPIO44  (hardware UART0, safe input)
-//   TX = GPIO43  (hardware UART0, safe output)
+// UART pins for OV2640 camera module (DISCOVERED via hardware testing):
+//   TX = GPIO40  (routed via GPIO matrix to UART1) - VERIFIED (makes Arduino RX LED blink)
+//   RX = GPIO3   (routed via GPIO matrix to UART1) - VERIFIED (receives {hello_ok} responses)
 //
-// OV2640 uses GPIO 4/5 for I2C (SIOD/SIOC), so GPIO1 is available but
-// GPIO43/44 are preferred for hardware UART0 compatibility.
+// CRITICAL: Uses UART1 (Serial1) instead of UART0 to avoid USB-CDC conflicts.
+// GPIO40/3 are routed via GPIO matrix to UART1 to prevent conflicts with the
+// ESP32-S3's internal USB-CDC bridge logic that can "lock" UART0 even when USB
+// is not connected.
 //
 // The shield P8 header labels "0(RX)" and "1(TX)" refer to Arduino D0/D1,
-// NOT ESP32 GPIO numbers. The physical routing maps to GPIO43/GPIO44.
+// NOT ESP32 GPIO numbers. Physical routing discovered via brute force testing:
+// - GPIO40 connects to Arduino RX (D0) - VERIFIED
+// - GPIO3 connects to Arduino TX (D1) - VERIFIED (tested with RX detection script)
 
-#define UART_RX_GPIO                44      // Hardware UART0 RX
-#define UART_TX_GPIO                43      // Hardware UART0 TX
+#define UART_RX_GPIO                3       // UART1 RX (via GPIO matrix) - receives from Arduino TX - VERIFIED
+#define UART_TX_GPIO                40      // UART1 TX (via GPIO matrix) - sends to Arduino RX - VERIFIED
 
 // ============================================================================
 // LED Pin Definition
 // ============================================================================
-// Status LED on GPIO3 for OV2640 configuration.
+// Status LED moved to GPIO14 to free GPIO3 for UART RX.
 // GPIO14 is available (not used by OV2640 camera).
 
-#define LED_STATUS_GPIO             3       // Status LED
+#define LED_STATUS_GPIO             14      // Status LED (moved from GPIO3 to free it for UART RX)
 
 // ============================================================================
 // Optional Camera LED / Flash LED
